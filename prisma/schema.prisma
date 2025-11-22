@@ -1,0 +1,40 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model UserBuild {
+  id           String          @id @default(cuid())
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  status       String          @default("PENDING")
+  baseDistro   String
+  packages     String[]
+  commands     String[]
+  outputFormat String
+  desktopEnv   String?
+  includeSteam Boolean?
+  logs         BuildLog[]
+  artifacts    BuildArtifact[]
+}
+
+model BuildLog {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  message   String
+  build     UserBuild @relation(fields: [buildId], references: [id])
+  buildId   String
+}
+
+model BuildArtifact {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  fileName  String
+  fileType  String
+  url       String
+  build     UserBuild @relation(fields: [buildId], references: [id])
+  buildId   String
+}

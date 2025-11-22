@@ -1,0 +1,15 @@
+{
+  "name": "Linux Builder Engine",
+  "dockerComposeFile": "docker-compose.yml",
+  "service": "app",
+  "workspaceFolder": "/workspace",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "prisma.prisma"
+      ]
+    }
+  }
+}
