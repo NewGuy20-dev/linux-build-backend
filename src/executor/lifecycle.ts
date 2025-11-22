@@ -2,6 +2,7 @@ import { BuildSpec } from '../ai/schema';
 import { generateDockerfile } from '../builder/dockerfileGenerator';
 import { generateIso } from '../builder/isoGenerator';
 import { exportDockerImage } from '../builder/tarExporter';
+import { pushImage } from '../services/docker/pushImage';
 import { createTempDir, cleanupDir } from '../utils/fs';
 import { executeCommand } from './executor';
 import { log } from './logger';
@@ -26,6 +27,13 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
     const imageName = `build-${buildId}`;
     await executeCommand(`docker build -t ${imageName} ${workspacePath}`, buildId);
     log(buildId, 'Docker image built');
+
+    const imageUrl = await pushImage(imageName, buildId);
+    await prisma.userBuild.update({
+      where: { id: buildId },
+      data: { imageUrl, hasGuiEnvironment: !!spec.desktopEnv },
+    });
+    log(buildId, `Pushed Docker image to ${imageUrl}`);
 
     if (spec.outputFormat === 'iso') {
       const isoPath = await generateIso(spec, buildId, workspacePath);

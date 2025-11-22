@@ -15,10 +15,12 @@ model UserBuild {
   packages     String[]
   commands     String[]
   outputFormat String
-  desktopEnv   String?
-  includeSteam Boolean?
-  logs         BuildLog[]
-  artifacts    BuildArtifact[]
+  desktopEnv        String?
+  includeSteam      Boolean?
+  imageUrl          String?
+  hasGuiEnvironment Boolean?
+  logs              BuildLog[]
+  artifacts         BuildArtifact[]
 }
 
 model BuildLog {
