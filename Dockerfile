@@ -1,32 +1,17 @@
-# Use a stable Debian release
-FROM debian:bullseye-slim
-
-# Set the working directory
+# Stage 1: Build the application
+FROM node:18-slim AS builder
 WORKDIR /app
-
-# Install Node.js, npm, and build tools
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    nodejs \
-    npm \
-    git \
-    live-build \
-    squashfs-tools \
-    xorriso \
-    syslinux \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy package.json and package-lock.json
 COPY package*.json ./
-
-# Install application dependencies
 RUN npm install
-
-# Copy the rest of the application code
 COPY . .
+RUN npm run build
 
-# Expose the port the app runs on
+# Stage 2: Create the production image
+FROM node:18-slim
+WORKDIR /app
+COPY --from=builder /app/package*.json ./
+RUN npm install --production
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
 EXPOSE 3000
-
-# Run the application
-CMD [ "npm", "run", "dev" ]
+CMD ["node", "dist/index.js"]
