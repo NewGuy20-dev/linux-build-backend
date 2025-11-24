@@ -7,32 +7,22 @@ generator client {
   previewFeatures = ["driverAdapters"]
 }
 
-model UserBuild {
-  id           String          @id @default(cuid())
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  status       String          @default("PENDING")
-  cancelledAt  DateTime?
-  baseDistro   String
+model Build {
+  id           String    @id @default(cuid())
+  name         String
   spec         Json
+  status       String    @default("queued")
+  imageUrl     String?
+  isoPath      String?
   logs         BuildLog[]
-  artifacts    BuildArtifact[]
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
 }
 
 model BuildLog {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
   message   String
-  build     UserBuild @relation(fields: [buildId], references: [id])
-  buildId   String
-}
-
-model BuildArtifact {
-  id        String    @id @default(cuid())
-  createdAt DateTime  @default(now())
-  fileName  String
-  fileType  String
-  url       String
-  build     UserBuild @relation(fields: [buildId], references: [id])
+  build     Build    @relation(fields: [buildId], references: [id])
   buildId   String
 }

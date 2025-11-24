@@ -1,14 +1,11 @@
 import { Router } from 'express';
-import { startBuild, getBuildStatus, getBuildArtifact } from './build.controller';
+import { createBuild, getBuild, getBuildLogs, launchGui } from './build.controller';
 
 const router = Router();
 
-router.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
-});
-
-router.post('/build/start', startBuild);
-router.get('/build/status/:id', getBuildStatus);
-router.get('/build/artifact/:id', getBuildArtifact);
+router.post('/build', createBuild);
+router.get('/build/:id', getBuild);
+router.get('/build/:id/logs', getBuildLogs);
+router.post('/build/:id/launch-gui', launchGui);
 
 export default router;
