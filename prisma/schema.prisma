@@ -12,12 +12,9 @@ model UserBuild {
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
   status       String          @default("PENDING")
+  cancelledAt  DateTime?
   baseDistro   String
-  packages     String[]
-  commands     String[]
-  outputFormat String
-  desktopEnv   String?
-  includeSteam Boolean?
+  spec         Json
   logs         BuildLog[]
   artifacts    BuildArtifact[]
 }

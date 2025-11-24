@@ -12,16 +12,23 @@ export const startBuild = async (req: Request, res: Response) => {
     await prisma.userBuild.create({
       data: {
         id: buildId,
-        ...buildSpec,
+        baseDistro: buildSpec.base,
+        spec: buildSpec as any,
       },
     });
 
+    // runBuildLifecycle is async but we don't await it to return quickly
+    // However, for the test, catching errors inside it is handled by the function itself.
     runBuildLifecycle(buildSpec, buildId);
 
     res.status(202).json({ buildId });
   } catch (error) {
     console.error('Error starting build:', error);
-    res.status(400).json({ error: 'Invalid build specification' });
+    if (error instanceof Error) {
+        res.status(400).json({ error: 'Invalid build specification', details: error.message, stack: (error as any).issues });
+    } else {
+        res.status(400).json({ error: 'Invalid build specification' });
+    }
   }
 };
 

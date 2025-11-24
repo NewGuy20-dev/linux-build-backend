@@ -3,6 +3,8 @@ import { executeCommand } from '../executor/executor';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { sanitizePackageName } from '../utils/sanitizer';
+import { checkCancellation } from '../utils/cancellation';
+import { flattenPackages } from '../utils/packages';
 
 const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
   // Create a dedicated workspace for the Arch ISO build
@@ -10,7 +12,8 @@ const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: 
   await fs.mkdir(archBuildWorkspace, { recursive: true });
 
   // Create the packages file
-  const sanitizedPackages = spec.packages.map(sanitizePackageName);
+  const packages = flattenPackages(spec.packages);
+  const sanitizedPackages = packages.map(sanitizePackageName);
   const packagesFileContent = sanitizedPackages.join('\n');
   const packagesFilePath = path.join(archBuildWorkspace, 'packages.x86_64');
   await fs.writeFile(packagesFilePath, packagesFileContent);
@@ -33,6 +36,7 @@ RUN mkarchiso -v -w /build/work -o /output .
   const imageName = `arch-builder-${buildId}`;
 
   // Build the temporary Arch builder container
+  await checkCancellation(buildId);
   await executeCommand(
     `docker build -t ${imageName} -f ${archDockerfilePath} .`,
     buildId,
@@ -41,6 +45,7 @@ RUN mkarchiso -v -w /build/work -o /output .
 
   // Run the container, mounting the output directory
   const absoluteOutDirPath = path.resolve(outDirPath);
+  await checkCancellation(buildId);
   await executeCommand(
     `docker run --privileged --rm -v ${absoluteOutDirPath}:/output ${imageName}`,
     buildId
@@ -55,6 +60,7 @@ RUN mkarchiso -v -w /build/work -o /output .
   }
 
   // Clean up the builder image
+  await checkCancellation(buildId);
   await executeCommand(`docker rmi ${imageName}`, buildId);
 
   return path.join(outDirPath, isoFile);
@@ -71,17 +77,19 @@ const generateDebianUbuntuIso = async (spec: BuildSpec, buildId: string, workspa
   const packageListPath = path.join(configPath, 'package-lists');
   await fs.mkdir(packageListPath, { recursive: true });
 
-  const sanitizedPackages = spec.packages.map(sanitizePackageName);
+  const packages = flattenPackages(spec.packages);
+  const sanitizedPackages = packages.map(sanitizePackageName);
   const packagesFilePath = path.join(packageListPath, 'my.list.chroot');
   await fs.writeFile(packagesFilePath, sanitizedPackages.join('\n'));
 
   // Differentiate between Debian and Ubuntu distributions
-  const distribution = spec.baseDistro === 'debian' ? 'bullseye' : 'focal';
-  const archiveAreas = spec.baseDistro === 'ubuntu' ? 'main universe' : 'main';
-  const mirror = spec.baseDistro === 'ubuntu' ? 'http://archive.ubuntu.com/ubuntu/' : 'http://deb.debian.org/debian/';
+  const distribution = spec.base === 'debian' ? 'bullseye' : 'focal';
+  const archiveAreas = spec.base === 'ubuntu' ? 'main universe' : 'main';
+  const mirror = spec.base === 'ubuntu' ? 'http://archive.ubuntu.com/ubuntu/' : 'http://deb.debian.org/debian/';
 
   const configCommand = `lb config --distribution ${distribution} --archive-areas "${archiveAreas}" --parent-mirror-bootstrap ${mirror}`;
 
+  await checkCancellation(buildId);
   await executeCommand(`${configCommand} && lb build`, buildId, { cwd: buildWorkspace });
 
   const files = await fs.readdir(buildWorkspace);
@@ -101,7 +109,8 @@ const generateAlpineIso = async (spec: BuildSpec, buildId: string, workspacePath
 
   // Create the profile script for mkimage.sh
   const profileName = `custom-${buildId}`;
-  const sanitizedPackages = spec.packages.map(sanitizePackageName);
+  const packages = flattenPackages(spec.packages);
+  const sanitizedPackages = packages.map(sanitizePackageName);
   const profileScript = `
 profile_${profileName}() {
   profile_standard
@@ -129,6 +138,7 @@ RUN ./mkimage.sh --profile ${profileName} --outdir /output
   const imageName = `alpine-builder-${buildId}`;
 
   // Build the temporary Alpine builder container
+  await checkCancellation(buildId);
   await executeCommand(
     `docker build -t ${imageName} -f ${alpineDockerfilePath} .`,
     buildId,
@@ -137,6 +147,7 @@ RUN ./mkimage.sh --profile ${profileName} --outdir /output
 
   // Run the container, mounting the output directory
   const absoluteOutDirPath = path.resolve(outDirPath);
+  await checkCancellation(buildId);
   await executeCommand(
     `docker run --rm -v ${absoluteOutDirPath}:/output ${imageName}`,
     buildId
@@ -151,13 +162,14 @@ RUN ./mkimage.sh --profile ${profileName} --outdir /output
   }
 
   // Clean up the builder image
+  await checkCancellation(buildId);
   await executeCommand(`docker rmi ${imageName}`, buildId);
 
   return path.join(outDirPath, isoFile);
 };
 
 export const generateIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
-  switch (spec.baseDistro) {
+  switch (spec.base) {
     case 'arch':
       return generateArchIso(spec, buildId, workspacePath);
     case 'debian':
@@ -166,6 +178,6 @@ export const generateIso = async (spec: BuildSpec, buildId: string, workspacePat
     case 'alpine':
       return generateAlpineIso(spec, buildId, workspacePath);
     default:
-      throw new Error(`Unsupported base distro for ISO generation: ${spec.baseDistro}`);
+      throw new Error(`Unsupported base distro for ISO generation: ${spec.base}`);
   }
 };
