@@ -2,13 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import { initWebSocketServer } from './ws/websocket';
-import buildRoutes from './api/build.routes';
+import routes from './api/routes';
+import './executor/session';
 
 const app = express();
 const server = http.createServer(app);
 
 app.use(express.json());
-app.use('/api', buildRoutes);
+app.use('/api', routes);
 
 initWebSocketServer(server);
 
