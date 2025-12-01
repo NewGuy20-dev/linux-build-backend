@@ -1,33 +1,38 @@
 import { Request, Response } from 'express';
-import { buildSchema } from '../ai/schema';
+import { buildSchema, BuildSpec } from '../ai/schema';
 import { runBuildLifecycle } from '../executor/lifecycle';
 import { generateId } from '../utils/id';
-import prisma from '../db/client';
+import prisma from '../db/db';
+import { normalizePackages } from '../utils/packages';
 
 export const startBuild = async (req: Request, res: Response) => {
   try {
     const buildSpec = buildSchema.parse(req.body);
+    const normalizedSpec: BuildSpec = {
+      ...buildSpec,
+      packages: normalizePackages(buildSpec.packages),
+    };
     const buildId = generateId();
 
     await prisma.userBuild.create({
       data: {
         id: buildId,
         baseDistro: buildSpec.base,
-        spec: buildSpec as any,
+        spec: normalizedSpec as any,
       },
     });
 
     // runBuildLifecycle is async but we don't await it to return quickly
     // However, for the test, catching errors inside it is handled by the function itself.
-    runBuildLifecycle(buildSpec, buildId);
+    runBuildLifecycle(normalizedSpec, buildId);
 
     res.status(202).json({ buildId });
   } catch (error) {
     console.error('Error starting build:', error);
     if (error instanceof Error) {
-        res.status(400).json({ error: 'Invalid build specification', details: error.message, stack: (error as any).issues });
+      res.status(400).json({ error: 'Invalid build specification', details: error.message, stack: (error as any).issues });
     } else {
-        res.status(400).json({ error: 'Invalid build specification' });
+      res.status(400).json({ error: 'Invalid build specification' });
     }
   }
 };

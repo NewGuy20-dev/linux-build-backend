@@ -1,4 +1,4 @@
-import prisma from '../db/client';
+import prisma from '../db/db';
 import { broadcast } from '../ws/websocket';
 
 export const log = async (buildId: string, message: string) => {

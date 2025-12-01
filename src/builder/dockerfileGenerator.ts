@@ -37,6 +37,7 @@ const generateArchDockerfile = (spec: BuildSpec): string => {
   const lines = [
     'FROM archlinux:latest',
     'RUN pacman-key --init && pacman-key --populate archlinux',
+    'RUN pacman -Sy --noconfirm reflector && reflector --latest 5 --sort rate --save /etc/pacman.d/mirrorlist',
     'RUN pacman -Syu --noconfirm',
   ];
 

@@ -4,6 +4,13 @@
   "service": "app",
   "workspaceFolder": "/workspace",
   "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "Linux Builder API",
+      "visibility": "public",
+      "onAutoForward": "ignore"
+    }
+  },
   "customizations": {
     "vscode": {
       "extensions": [

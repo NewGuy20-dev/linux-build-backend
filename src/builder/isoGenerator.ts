@@ -7,15 +7,18 @@ import { checkCancellation } from '../utils/cancellation';
 import { flattenPackages } from '../utils/packages';
 
 const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  const resolvedWorkspace = path.resolve(workspacePath);
+  await fs.mkdir(resolvedWorkspace, { recursive: true });
+
   // Create a dedicated workspace for the Arch ISO build
-  const archBuildWorkspace = path.join(workspacePath, 'arch_iso_build');
+  const archBuildWorkspace = path.join(resolvedWorkspace, 'arch_iso_build');
   await fs.mkdir(archBuildWorkspace, { recursive: true });
 
-  // Create the packages file
+  // Create the packages file at the root of the Docker build context
   const packages = flattenPackages(spec.packages);
   const sanitizedPackages = packages.map(sanitizePackageName);
   const packagesFileContent = sanitizedPackages.join('\n');
-  const packagesFilePath = path.join(archBuildWorkspace, 'packages.x86_64');
+  const packagesFilePath = path.join(resolvedWorkspace, 'packages.x86_64');
   await fs.writeFile(packagesFilePath, packagesFileContent);
 
   // Create a temporary Dockerfile for the Arch build environment
@@ -26,28 +29,34 @@ WORKDIR /build
 COPY packages.x86_64 /build/packages.x86_64
 RUN cp -r /usr/share/archiso/configs/releng/ .
 RUN cat /build/packages.x86_64 >> /build/releng/packages.x86_64
-RUN mkarchiso -v -w /build/work -o /output .
+CMD ["mkarchiso", "-v", "-w", "/build/work", "-o", "/output", "/build/releng"]
   `;
   const archDockerfilePath = path.join(archBuildWorkspace, 'Dockerfile.arch');
   await fs.writeFile(archDockerfilePath, archDockerfile);
 
-  const outDirPath = path.join(workspacePath, 'out');
+  const outDirPath = path.join(resolvedWorkspace, 'out');
   await fs.mkdir(outDirPath, { recursive: true });
   const imageName = `arch-builder-${buildId}`;
+
+  // Ensure packages.x86_64 exists before attempting the docker build
+  try {
+    await fs.access(packagesFilePath);
+  } catch {
+    throw new Error(`packages.x86_64 was not found at ${packagesFilePath}, cannot build Arch ISO`);
+  }
 
   // Build the temporary Arch builder container
   await checkCancellation(buildId);
   await executeCommand(
-    `docker build -t ${imageName} -f ${archDockerfilePath} .`,
-    buildId,
-    { cwd: archBuildWorkspace }
+    `docker build -t ${imageName} -f "${archDockerfilePath}" "${resolvedWorkspace}"`,
+    buildId
   );
 
-  // Run the container, mounting the output directory
+  // Run the container with --privileged to allow chroot mounts
   const absoluteOutDirPath = path.resolve(outDirPath);
   await checkCancellation(buildId);
   await executeCommand(
-    `docker run --privileged --rm -v ${absoluteOutDirPath}:/output ${imageName}`,
+    `docker run --privileged --rm -v "${absoluteOutDirPath}:/output" ${imageName}`,
     buildId
   );
 
@@ -68,7 +77,10 @@ RUN mkarchiso -v -w /build/work -o /output .
 
 
 const generateDebianUbuntuIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
-  const buildWorkspace = path.join(workspacePath, 'live-build');
+  const resolvedWorkspace = path.resolve(workspacePath);
+  await fs.mkdir(resolvedWorkspace, { recursive: true });
+
+  const buildWorkspace = path.join(resolvedWorkspace, 'live-build');
   await fs.mkdir(buildWorkspace, { recursive: true });
 
   const configPath = path.join(buildWorkspace, 'config');
@@ -103,8 +115,11 @@ const generateDebianUbuntuIso = async (spec: BuildSpec, buildId: string, workspa
 };
 
 const generateAlpineIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  const resolvedWorkspace = path.resolve(workspacePath);
+  await fs.mkdir(resolvedWorkspace, { recursive: true });
+
   // Create a dedicated workspace for the Alpine ISO build
-  const alpineBuildWorkspace = path.join(workspacePath, 'alpine_iso_build');
+  const alpineBuildWorkspace = path.join(resolvedWorkspace, 'alpine_iso_build');
   await fs.mkdir(alpineBuildWorkspace, { recursive: true });
 
   // Create the profile script for mkimage.sh
@@ -133,23 +148,22 @@ RUN ./mkimage.sh --profile ${profileName} --outdir /output
   const alpineDockerfilePath = path.join(alpineBuildWorkspace, 'Dockerfile.alpine');
   await fs.writeFile(alpineDockerfilePath, alpineDockerfile);
 
-  const outDirPath = path.join(workspacePath, 'out');
+  const outDirPath = path.join(resolvedWorkspace, 'out');
   await fs.mkdir(outDirPath, { recursive: true });
   const imageName = `alpine-builder-${buildId}`;
 
   // Build the temporary Alpine builder container
   await checkCancellation(buildId);
   await executeCommand(
-    `docker build -t ${imageName} -f ${alpineDockerfilePath} .`,
-    buildId,
-    { cwd: alpineBuildWorkspace }
+    `docker build -t ${imageName} -f "${alpineDockerfilePath}" "${resolvedWorkspace}"`,
+    buildId
   );
 
   // Run the container, mounting the output directory
   const absoluteOutDirPath = path.resolve(outDirPath);
   await checkCancellation(buildId);
   await executeCommand(
-    `docker run --rm -v ${absoluteOutDirPath}:/output ${imageName}`,
+    `docker run --rm -v "${absoluteOutDirPath}:/output" ${imageName}`,
     buildId
   );
 

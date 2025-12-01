@@ -2,3 +2,7 @@ node_modules
 .env
 dist/
 temp/
+.env.local
+# Build artifacts
+artifacts/*
+!artifacts/.gitkeep

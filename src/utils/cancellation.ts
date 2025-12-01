@@ -1,4 +1,4 @@
-import prisma from '../db/client';
+import prisma from '../db/db';
 
 export const checkCancellation = async (buildId: string) => {
   const build = await prisma.userBuild.findUnique({

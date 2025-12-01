@@ -18,13 +18,18 @@ const defaultsSchema = z.object({
   macRandomization: z.boolean().optional(),
 });
 
+const packagesSchema = z.union([
+  z.array(z.string()),
+  z.record(z.string(), z.boolean()),
+]);
+
 export const buildSchema = z.object({
   base: z.string(),
   kernel: z.string().optional(),
   init: z.string().optional(),
   architecture: z.string().optional(),
   display: displaySchema.optional(),
-  packages: z.record(z.string(), z.array(z.string())),
+  packages: packagesSchema,
   securityFeatures: z.array(z.string()).optional(),
   defaults: defaultsSchema.optional(),
 });
