@@ -8,12 +8,13 @@ import buildRoutes from './api/build.routes';
 const app = express();
 const server = http.createServer(app);
 
-// CORS - allow frontend origins
+// CORS - allow all origins (temporary)
 app.use(cors({
-  origin: process.env.FRONTEND_URL || '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  credentials: true,
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 }));
+
+app.options('*', cors());
 
 app.use((req, _res, next) => {
   const forwardedFor = req.headers['x-forwarded-for'];

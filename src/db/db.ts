@@ -1,35 +1,38 @@
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
-import { PrismaNeon } from '@prisma/adapter-neon';
-import { neonConfig } from '@neondatabase/serverless';
+import { PrismaNeonHttp } from '@prisma/adapter-neon';
 
 const connectionString = process.env.DATABASE_URL;
 
 if (!connectionString) {
-  throw new Error('DATABASE_URL is not set');
+  throw new Error('DATABASE_URL environment variable is not set');
 }
 
-const maskConnectionString = (value: string) => value.replace(/:[^:@]+@/, ':****@');
-const isNeonConnection = /neon\.tech/i.test(connectionString);
+const adapter = new PrismaNeonHttp(connectionString, { fullResults: true });
+const basePrisma = new PrismaClient({ adapter } as any);
 
-let prisma: PrismaClient;
-
-if (isNeonConnection) {
-  console.log('Initializing Neon HTTP adapter with connection string:', maskConnectionString(connectionString));
-
-  // Force the Neon driver to use the fetch-based HTTP transport for every query type.
-  neonConfig.poolQueryViaFetch = true;
-  neonConfig.fetchConnectionCache = true;
-  neonConfig.useSecureWebSocket = false;
-  neonConfig.webSocketConstructor = undefined;
-  neonConfig.coalesceWrites = false;
-  neonConfig.pipelineTLS = false;
-  neonConfig.pipelineConnect = 'password';
-
-  const adapter = new PrismaNeon({ connectionString });
-  prisma = new PrismaClient({ adapter } as any);
-} else {
-  console.log('Initializing standard Prisma client');
-  prisma = new PrismaClient();
-}
+// Add retry logic for transient connection failures
+const prisma = basePrisma.$extends({
+  query: {
+    async $allOperations({ operation, model, args, query }) {
+      const maxRetries = 3;
+      let lastError;
+      for (let i = 0; i < maxRetries; i++) {
+        try {
+          return await query(args);
+        } catch (error: any) {
+          lastError = error;
+          if (error.message?.includes('ETIMEDOUT') || error.message?.includes('fetch failed')) {
+            console.log(`[DB] Retry ${i + 1}/${maxRetries} for ${model}.${operation}`);
+            await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+            continue;
+          }
+          throw error;
+        }
+      }
+      throw lastError;
+    },
+  },
+});
 
 export default prisma;

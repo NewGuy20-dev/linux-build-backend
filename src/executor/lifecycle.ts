@@ -83,8 +83,7 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
         data: { buildId, fileName: path.basename(artifactPath), fileType: 'iso', url: artifactPath },
       }));
     } catch (err) {
-      log(buildId, `Failed to generate ISO: ${err}`);
-      throw err;
+      log(buildId, `Failed to generate ISO (non-fatal): ${err}`);
     }
 
     await safeDbCall(buildId, () => prisma.userBuild.update({ where: { id: buildId }, data: { status: 'SUCCESS' } }));
