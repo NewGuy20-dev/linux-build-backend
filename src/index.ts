@@ -4,6 +4,7 @@ import http from 'http';
 import cors from 'cors';
 import { initWebSocketServer } from './ws/websocket';
 import buildRoutes from './api/build.routes';
+import { startArtifactCleanupJob } from './utils/artifactCleanup';
 
 const app = express();
 const server = http.createServer(app);
@@ -35,4 +36,5 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 server.listen(PORT, HOST, () => {
   console.log(`Server is running on http://${HOST}:${PORT}`);
+  startArtifactCleanupJob();
 });

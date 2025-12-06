@@ -4,6 +4,8 @@ import { runBuildLifecycle } from '../executor/lifecycle';
 import { generateId } from '../utils/id';
 import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export const startBuild = async (req: Request, res: Response) => {
   try {
@@ -46,7 +48,23 @@ export const getBuildStatus = async (req: Request, res: Response) => {
     });
 
     if (build) {
-      res.status(200).json(build);
+      const downloadUrls: {
+        dockerImage?: string;
+        dockerTarDownloadUrl?: string;
+        isoDownloadUrl?: string;
+      } = {};
+
+      for (const artifact of build.artifacts) {
+        if (artifact.fileType === 'docker-image-ref') {
+          downloadUrls.dockerImage = artifact.url;
+        } else if (artifact.fileType === 'docker-image') {
+          downloadUrls.dockerTarDownloadUrl = `/api/build/download/${id}/docker`;
+        } else if (artifact.fileType === 'iso') {
+          downloadUrls.isoDownloadUrl = `/api/build/download/${id}/iso`;
+        }
+      }
+
+      res.status(200).json({ ...build, downloadUrls });
     } else {
       res.status(404).json({ error: 'Build not found' });
     }
@@ -64,14 +82,58 @@ export const getBuildArtifact = async (req: Request, res: Response) => {
     });
 
     if (artifact) {
-      // In a real application, we would redirect to a signed URL for the artifact.
-      // For now, we'll just send the placeholder URL.
       res.status(200).json({ url: artifact.url });
     } else {
       res.status(404).json({ error: 'Artifact not found' });
     }
   } catch (error) {
     console.error(`Error getting build artifact for ID ${req.params.id}:`, error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const downloadArtifact = async (req: Request, res: Response) => {
+  try {
+    const { id, type } = req.params;
+    
+    if (!['iso', 'docker'].includes(type)) {
+      res.status(400).json({ error: 'Invalid artifact type. Use "iso" or "docker"' });
+      return;
+    }
+
+    const fileType = type === 'iso' ? 'iso' : 'docker-image';
+    const artifact = await prisma.buildArtifact.findFirst({
+      where: { buildId: id, fileType },
+    });
+
+    if (!artifact) {
+      res.status(404).json({ error: `${type} artifact not found for this build` });
+      return;
+    }
+
+    if (artifact.fileType === 'docker-image-ref') {
+      res.status(200).json({ 
+        type: 'docker-hub-reference',
+        pullCommand: `docker pull ${artifact.url}`,
+        image: artifact.url 
+      });
+      return;
+    }
+
+    const filePath = artifact.url;
+    if (!fs.existsSync(filePath)) {
+      res.status(404).json({ error: 'Artifact file not found on server' });
+      return;
+    }
+
+    const fileName = path.basename(filePath);
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    
+    const fileStream = fs.createReadStream(filePath);
+    fileStream.pipe(res);
+  } catch (error) {
+    console.error(`Error downloading artifact for ID ${req.params.id}:`, error);
     res.status(500).json({ error: 'Internal server error' });
   }
 };

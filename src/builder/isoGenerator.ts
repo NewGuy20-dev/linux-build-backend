@@ -12,11 +12,13 @@ const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: 
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
+  const echoCommands = packages.map(pkg => `RUN echo "${pkg}" >> /releng/packages.x86_64`).join('\n');
+  
   const dockerfile = `
 FROM archlinux:latest
 RUN pacman -Syu --noconfirm archiso
 RUN cp -r /usr/share/archiso/configs/releng /releng
-RUN echo "${packages.join('\\n')}" >> /releng/packages.x86_64
+${echoCommands}
 CMD ["mkarchiso", "-v", "-w", "/work", "-o", "/out", "/releng"]
 `.trim();
 
@@ -43,12 +45,14 @@ const generateDebianIso = async (spec: BuildSpec, buildId: string, workspacePath
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
+  const packageList = packages.join(' ');
+  
   const dockerfile = `
 FROM debian:bookworm
 RUN apt-get update && apt-get install -y live-build
 WORKDIR /build
 RUN lb config --distribution bookworm --archive-areas "main contrib non-free non-free-firmware"
-RUN mkdir -p config/package-lists && echo "${packages.join('\\n')}" > config/package-lists/custom.list.chroot
+RUN mkdir -p config/package-lists && printf '%s\\n' ${packages.map(p => `"${p}"`).join(' ')} > config/package-lists/custom.list.chroot
 RUN lb build
 CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 `.trim();
@@ -81,7 +85,7 @@ FROM ubuntu:noble
 RUN apt-get update && apt-get install -y live-build
 WORKDIR /build
 RUN lb config --distribution noble --archive-areas "main restricted universe multiverse" --parent-mirror-bootstrap http://archive.ubuntu.com/ubuntu/
-RUN mkdir -p config/package-lists && echo "${packages.join('\\n')}" > config/package-lists/custom.list.chroot
+RUN mkdir -p config/package-lists && printf '%s\\n' ${packages.map(p => `"${p}"`).join(' ')} > config/package-lists/custom.list.chroot
 RUN lb build
 CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 `.trim();

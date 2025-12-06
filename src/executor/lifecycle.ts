@@ -9,6 +9,7 @@ import { checkCancellation } from '../utils/cancellation';
 import prisma from '../db/db';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { broadcastBuildComplete, BuildCompletePayload } from '../ws/websocket';
 
 const ARTIFACTS_DIR = path.resolve('artifacts');
 
@@ -22,6 +23,32 @@ const moveToArtifacts = async (srcPath: string, buildId: string): Promise<string
   const destPath = path.join(buildArtifactsDir, path.basename(srcPath));
   await fs.rename(srcPath, destPath);
   return destPath;
+};
+
+const sendBuildCompleteNotification = async (buildId: string, status: 'SUCCESS' | 'FAILED' | 'CANCELLED') => {
+  const artifacts = await prisma.buildArtifact.findMany({ where: { buildId } });
+  
+  console.log(`[${buildId}] Sending BUILD_COMPLETE notification. Found ${artifacts.length} artifacts:`, artifacts.map(a => ({ fileType: a.fileType, url: a.url })));
+  
+  const payload: BuildCompletePayload = {
+    type: 'BUILD_COMPLETE',
+    buildId,
+    status,
+    artifacts: {},
+  };
+
+  for (const artifact of artifacts) {
+    if (artifact.fileType === 'docker-image-ref') {
+      payload.artifacts.dockerImage = artifact.url;
+    } else if (artifact.fileType === 'docker-image') {
+      payload.artifacts.dockerTarDownloadUrl = `/api/build/download/${buildId}/docker`;
+    } else if (artifact.fileType === 'iso') {
+      payload.artifacts.isoDownloadUrl = `/api/build/download/${buildId}/iso`;
+    }
+  }
+
+  console.log(`[${buildId}] WebSocket payload:`, JSON.stringify(payload));
+  broadcastBuildComplete(payload);
 };
 
 export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
@@ -47,9 +74,17 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
     await executeCommand(`docker build -t ${imageName} "${workspacePath}"`, buildId);
     log(buildId, 'Docker image built');
 
-    const registryUrl = process.env.DOCKER_REGISTRY_URL;
-    if (registryUrl) {
-      const remoteTag = `${registryUrl}/${imageName}:latest`;
+    const dockerRepo = process.env.DOCKER_IMAGE_REPO;
+    if (dockerRepo) {
+      const dockerUser = process.env.DOCKER_HUB_USER;
+      const dockerToken = process.env.DOCKER_HUB_TOKEN;
+      
+      if (dockerUser && dockerToken) {
+        log(buildId, `Authenticating with Docker Hub...`);
+        await executeCommand(`echo "${dockerToken}" | docker login -u ${dockerUser} --password-stdin`, buildId);
+      }
+      
+      const remoteTag = `${dockerRepo}:${buildId}`;
       log(buildId, `Pushing to registry: ${remoteTag}`);
       await executeCommand(`docker tag ${imageName} ${remoteTag}`, buildId);
       try {
@@ -88,14 +123,17 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
 
     await safeDbCall(buildId, () => prisma.userBuild.update({ where: { id: buildId }, data: { status: 'SUCCESS' } }));
     log(buildId, 'Build lifecycle completed successfully');
+    await sendBuildCompleteNotification(buildId, 'SUCCESS');
 
   } catch (error: any) {
     console.error(error);
+    const status = error.message === 'BUILD_CANCELLED' ? 'CANCELLED' : 'FAILED';
     await safeDbCall(buildId, () => prisma.userBuild.update({
       where: { id: buildId },
-      data: { status: error.message === 'BUILD_CANCELLED' ? 'CANCELLED' : 'FAILED' },
+      data: { status },
     }));
-    log(buildId, error.message === 'BUILD_CANCELLED' ? 'Build lifecycle cancelled' : 'Build lifecycle failed');
+    log(buildId, status === 'CANCELLED' ? 'Build lifecycle cancelled' : 'Build lifecycle failed');
+    await sendBuildCompleteNotification(buildId, status);
   } finally {
     if (workspacePath) {
       await cleanupDir(workspacePath);

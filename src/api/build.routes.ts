@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { startBuild, getBuildStatus, getBuildArtifact } from './build.controller';
+import { startBuild, getBuildStatus, getBuildArtifact, downloadArtifact } from './build.controller';
 
 const router = Router();
 
@@ -11,5 +11,6 @@ router.post('/build', startBuild);
 router.post('/build/start', startBuild);
 router.get('/build/status/:id', getBuildStatus);
 router.get('/build/artifact/:id', getBuildArtifact);
+router.get('/build/download/:id/:type', downloadArtifact);
 
 export default router;
