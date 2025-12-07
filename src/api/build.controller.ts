@@ -4,6 +4,7 @@ import { runBuildLifecycle } from '../executor/lifecycle';
 import { generateId } from '../utils/id';
 import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
+import { generateBuildSpec } from '../ai/gemini';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -135,5 +136,28 @@ export const downloadArtifact = async (req: Request, res: Response) => {
   } catch (error) {
     console.error(`Error downloading artifact for ID ${req.params.id}:`, error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+export const generateFromPrompt = async (req: Request, res: Response) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt || typeof prompt !== 'string') {
+      res.status(400).json({ error: 'Missing or invalid "prompt" field' });
+      return;
+    }
+
+    const buildSpec = await generateBuildSpec(prompt);
+    res.status(200).json({ spec: buildSpec });
+  } catch (error) {
+    console.error('Error generating build spec from prompt:', error);
+    if (error instanceof SyntaxError) {
+      res.status(500).json({ error: 'AI returned invalid JSON' });
+    } else if (error instanceof Error) {
+      res.status(500).json({ error: 'Failed to generate build spec', details: error.message });
+    } else {
+      res.status(500).json({ error: 'Failed to generate build spec' });
+    }
   }
 };
