@@ -4,13 +4,24 @@ import { runBuildLifecycle } from '../executor/lifecycle';
 import { generateId } from '../utils/id';
 import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
-import { generateBuildSpec } from '../ai/gemini';
+import { generateBuildSpec } from '../ai/ollama';
 import * as fs from 'fs';
 import * as path from 'path';
 
 export const startBuild = async (req: Request, res: Response) => {
   try {
-    const buildSpec = buildSchema.parse(req.body);
+    let buildSpec: BuildSpec;
+
+    // Check if request is a prompt (string) or direct JSON spec
+    if (req.body.prompt && typeof req.body.prompt === 'string') {
+      // Frontend sent a prompt - generate spec via AI
+      console.log('Received prompt, generating build spec via AI...');
+      buildSpec = await generateBuildSpec(req.body.prompt);
+    } else {
+      // Frontend sent a direct JSON spec
+      buildSpec = buildSchema.parse(req.body);
+    }
+
     const normalizedSpec: BuildSpec = {
       ...buildSpec,
       packages: normalizePackages(buildSpec.packages),
@@ -25,11 +36,9 @@ export const startBuild = async (req: Request, res: Response) => {
       },
     });
 
-    // runBuildLifecycle is async but we don't await it to return quickly
-    // However, for the test, catching errors inside it is handled by the function itself.
     runBuildLifecycle(normalizedSpec, buildId);
 
-    res.status(202).json({ buildId });
+    res.status(202).json({ buildId, spec: normalizedSpec });
   } catch (error) {
     console.error('Error starting build:', error);
     if (error instanceof Error) {
