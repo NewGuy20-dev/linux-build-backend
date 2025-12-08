@@ -8,21 +8,31 @@ generator client {
 }
 
 model UserBuild {
-  id           String          @id @default(cuid())
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  status       String          @default("PENDING")
-  cancelledAt  DateTime?
-  baseDistro   String
-  spec         Json
-  logs         BuildLog[]
-  artifacts    BuildArtifact[]
+  id             String          @id @default(cuid())
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  status         String          @default("PENDING")
+  cancelledAt    DateTime?
+  baseDistro     String
+  spec           Json
+  
+  // New fields for enhanced schema
+  kernelVersion  String?
+  initSystem     String?
+  architecture   String?         @default("x86_64")
+  securityLevel  String?         // minimal, standard, hardened
+  buildDuration  Int?            // seconds
+  warnings       String[]        @default([])
+  
+  logs           BuildLog[]
+  artifacts      BuildArtifact[]
 }
 
 model BuildLog {
   id        String    @id @default(cuid())
   createdAt DateTime  @default(now())
   message   String
+  level     String    @default("info") // info, warn, error
   build     UserBuild @relation(fields: [buildId], references: [id])
   buildId   String
 }
@@ -31,8 +41,10 @@ model BuildArtifact {
   id        String    @id @default(cuid())
   createdAt DateTime  @default(now())
   fileName  String
-  fileType  String
+  fileType  String    // docker-image, docker-image-ref, iso, rootfs
   url       String
+  size      BigInt?   // bytes
+  checksum  String?   // sha256
   build     UserBuild @relation(fields: [buildId], references: [id])
   buildId   String
 }

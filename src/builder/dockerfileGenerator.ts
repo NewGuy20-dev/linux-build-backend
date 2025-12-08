@@ -1,108 +1,173 @@
 import { BuildSpec } from '../ai/schema';
-import { sanitizePackageName } from '../utils/sanitizer';
-import { flattenPackages } from '../utils/packages';
+import { resolvePackages, getPackageManager } from './packageMaps';
 
-const ARCH_SPECIAL_PACKAGE_HANDLERS: Record<string, string[]> = {
-  'oh-my-zsh': [
-    'RUN git clone --depth=1 https://github.com/ohmyzsh/ohmyzsh.git /opt/oh-my-zsh',
-    'RUN ln -s /opt/oh-my-zsh /usr/share/oh-my-zsh || true',
-  ],
+const DOCKER_IMAGES: Record<string, string> = {
+  arch: 'archlinux:latest',
+  debian: 'debian:latest',
+  ubuntu: 'ubuntu:latest',
+  alpine: 'alpine:latest',
+  fedora: 'fedora:latest',
+  opensuse: 'opensuse/tumbleweed:latest',
+  void: 'voidlinux/voidlinux:latest',
+  gentoo: 'gentoo/stage3:latest',
 };
 
-const generateArchDockerfile = (spec: BuildSpec): string => {
-  const packages = flattenPackages(spec.packages);
-  const specialCommands: string[] = [];
-  const filteredPackages: string[] = [];
-  let requiresGit = false;
-
-  packages.forEach((pkg) => {
-    const handler = ARCH_SPECIAL_PACKAGE_HANDLERS[pkg];
-    if (handler) {
-      specialCommands.push(...handler);
-      if (pkg === 'oh-my-zsh') {
-        requiresGit = true;
-      }
-      return;
+function flattenPackages(spec: BuildSpec): string[] {
+  const pkgs = spec.packages;
+  if (Array.isArray(pkgs)) return pkgs;
+  if (typeof pkgs === 'object' && pkgs !== null) {
+    if ('base' in pkgs && Array.isArray((pkgs as { base: string[] }).base)) {
+      const p = pkgs as { base: string[]; development: string[]; ai_ml: string[]; security: string[]; networking: string[]; databases: string[]; servers: string[]; multimedia: string[]; utils: string[] };
+      return [...p.base, ...p.development, ...p.ai_ml, ...p.security, ...p.networking, ...p.databases, ...p.servers, ...p.multimedia, ...p.utils];
     }
-    filteredPackages.push(pkg);
-  });
-
-  if (requiresGit && !packages.includes('git')) {
-    filteredPackages.push('git');
+    // Record<string, boolean> format
+    return Object.entries(pkgs as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
   }
-  const sanitizedPackages = filteredPackages
-    .map(sanitizePackageName)
-    .filter((pkg) => pkg.length > 0);
+  return [];
+}
 
-  const lines = [
-    'FROM archlinux:latest',
-    'RUN pacman-key --init && pacman-key --populate archlinux',
-    'RUN pacman -Sy --noconfirm reflector && reflector --latest 5 --sort rate --save /etc/pacman.d/mirrorlist',
-  ];
+function generateShellSetup(spec: BuildSpec, distro: string): string[] {
+  const lines: string[] = [];
+  const shell = spec.customization?.shell || 'bash';
+  const pm = getPackageManager(distro);
 
-  if (sanitizedPackages.length > 0) {
-    lines.push(`RUN pacman -Syu --noconfirm && pacman -S --noconfirm ${sanitizedPackages.join(' ')}`);
-  } else {
-    lines.push('RUN pacman -Syu --noconfirm');
+  if (shell !== 'bash') {
+    const { packages } = resolvePackages([shell], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]}`);
+    }
   }
 
-  lines.push(...specialCommands);
+  if (spec.customization?.shellFramework === 'oh-my-zsh' && shell === 'zsh') {
+    lines.push('RUN sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended || true');
+  }
 
-  return lines.join('\n').trim();
-};
+  if (spec.customization?.shellTheme === 'starship') {
+    lines.push('RUN curl -sS https://starship.rs/install.sh | sh -s -- -y || true');
+  }
 
-const generateDebianDockerfile = (spec: BuildSpec): string => {
-  const packages = flattenPackages(spec.packages);
-  const sanitizedPackages = packages.map(sanitizePackageName);
+  return lines;
+}
 
-  const packageInstallCommand = sanitizedPackages.length > 0 ? `RUN apt-get install -y ${sanitizedPackages.join(' ')}` : '';
+function generateSecuritySetup(spec: BuildSpec, distro: string): string[] {
+  const lines: string[] = [];
+  const pm = getPackageManager(distro);
+  const sec = spec.securityFeatures;
+  if (!sec) return lines;
 
-  return `
-FROM debian:latest
-RUN apt-get update
-${packageInstallCommand}
-`.trim();
-};
+  // Install security packages
+  const secPkgs: string[] = [];
+  if (sec.mac?.includes('apparmor')) secPkgs.push('apparmor');
+  if (sec.mac?.includes('selinux')) secPkgs.push('selinux');
+  if (sec.firewall?.backend) secPkgs.push(sec.firewall.backend);
+  if (sec.ssh?.fail2ban) secPkgs.push('fail2ban');
 
-const generateUbuntuDockerfile = (spec: BuildSpec): string => {
-  const packages = flattenPackages(spec.packages);
-  const sanitizedPackages = packages.map(sanitizePackageName);
+  if (secPkgs.length) {
+    const { packages, warnings } = resolvePackages(secPkgs, distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages.join(' ')} || true`);
+    }
+    warnings.forEach(w => lines.push(`# WARNING: ${w}`));
+  }
 
-  const packageInstallCommand = sanitizedPackages.length > 0 ? `RUN apt-get install -y ${sanitizedPackages.join(' ')}` : '';
+  return lines;
+}
 
-  return `
-FROM ubuntu:latest
-RUN apt-get update
-${packageInstallCommand}
-`.trim();
-};
+function generateServiceSetup(spec: BuildSpec): string[] {
+  const lines: string[] = [];
+  const init = spec.init || 'systemd';
+  const services = spec.postInstall?.services || [];
 
-const generateAlpineDockerfile = (spec: BuildSpec): string => {
-  const packages = flattenPackages(spec.packages);
-  const sanitizedPackages = packages.map(sanitizePackageName);
+  for (const svc of services) {
+    switch (init) {
+      case 'systemd':
+        lines.push(`RUN systemctl enable ${svc} 2>/dev/null || true`);
+        break;
+      case 'openrc':
+        lines.push(`RUN rc-update add ${svc} default 2>/dev/null || true`);
+        break;
+      case 'runit':
+        lines.push(`RUN ln -sf /etc/sv/${svc} /var/service/ 2>/dev/null || true`);
+        break;
+      case 's6':
+        lines.push(`# S6 service setup for ${svc}`);
+        break;
+    }
+  }
 
-  const packageInstallCommand = sanitizedPackages.length > 0 ? `RUN apk add --no-cache ${sanitizedPackages.join(' ')}` : '';
+  return lines;
+}
 
-  return `
-FROM alpine:latest
-${packageInstallCommand}
-`.trim();
-};
+function generateDistroDockerfile(spec: BuildSpec): string {
+  const distro = spec.base;
+  const image = DOCKER_IMAGES[distro];
+  const pm = getPackageManager(distro);
 
-export const generateDockerfile = (spec: BuildSpec): string => {
-  switch (spec.base) {
+  const allPackages = flattenPackages(spec);
+  const { packages, warnings } = resolvePackages(allPackages, distro);
+
+  const lines: string[] = [`FROM ${image}`];
+
+  // Add warnings as comments
+  warnings.forEach(w => lines.push(`# WARNING: ${w}`));
+
+  // Distro-specific setup
+  switch (distro) {
     case 'arch':
-      return generateArchDockerfile(spec);
-    case 'debian':
-      return generateDebianDockerfile(spec);
-    case 'ubuntu':
-      return generateUbuntuDockerfile(spec);
+      lines.push('RUN pacman-key --init && pacman-key --populate archlinux');
+      lines.push('RUN pacman -Sy --noconfirm reflector && reflector --latest 5 --sort rate --save /etc/pacman.d/mirrorlist || true');
+      break;
+    case 'gentoo':
+      lines.push('RUN emerge --sync --quiet');
+      lines.push('RUN echo \'MAKEOPTS="-j$(nproc)"\' >> /etc/portage/make.conf');
+      lines.push('RUN echo \'FEATURES="binpkg-request-signature getbinpkg"\' >> /etc/portage/make.conf');
+      break;
+    case 'void':
+      lines.push('RUN xbps-install -Syu xbps');
+      break;
     case 'alpine':
-      return generateAlpineDockerfile(spec);
-    default:
-      // Fallback or throw. For this test, assuming valid base.
-      // If specific base like 'linux-zen' (kernel) is confused with base distro, handle it.
-      // The spec says "base": "arch".
-      throw new Error(`Unsupported base distro: ${spec.base}`);
+      lines.push('RUN apk update');
+      break;
+    case 'opensuse':
+      lines.push('RUN zypper refresh');
+      break;
   }
-};
+
+  // System update
+  if (distro !== 'gentoo') {
+    lines.push(`RUN ${pm.update}`);
+  }
+
+  // Install packages
+  if (packages.length > 0) {
+    // Split into chunks for better caching
+    const chunkSize = 20;
+    for (let i = 0; i < packages.length; i += chunkSize) {
+      const chunk = packages.slice(i, i + chunkSize);
+      lines.push(`RUN ${pm.install} ${chunk.join(' ')} || true`);
+    }
+  }
+
+  // Shell setup
+  lines.push(...generateShellSetup(spec, distro));
+
+  // Security setup
+  lines.push(...generateSecuritySetup(spec, distro));
+
+  // Service setup
+  lines.push(...generateServiceSetup(spec));
+
+  // Set default shell if not bash
+  if (spec.customization?.shell && spec.customization.shell !== 'bash') {
+    lines.push(`RUN chsh -s /bin/${spec.customization.shell} root 2>/dev/null || true`);
+  }
+
+  return lines.join('\n');
+}
+
+export function generateDockerfile(spec: BuildSpec): string {
+  if (!DOCKER_IMAGES[spec.base]) {
+    throw new Error(`Unsupported base distro: ${spec.base}`);
+  }
+  return generateDistroDockerfile(spec);
+}

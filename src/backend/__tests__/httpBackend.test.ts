@@ -20,10 +20,10 @@ test('HttpBackend.build issues a POST request to /api/build', async () => {
   }) as any;
 
   const backend = new HttpBackend('https://example.com', fakeFetch);
-  const spec: BuildSpec = {
+  const spec = {
     base: 'arch',
     packages: ['linux-zen'],
-  };
+  } as BuildSpec;
 
   const response = await backend.build(spec);
 
