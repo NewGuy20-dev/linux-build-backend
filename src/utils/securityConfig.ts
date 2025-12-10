@@ -56,6 +56,15 @@ MaxAuthTries 3
 `;
 }
 
+/**
+ * Produce a sysctl configuration snippet that applies common kernel and network hardening settings.
+ *
+ * @returns A string containing sysctl key‑value lines for:
+ * - `kernel.randomize_va_space = 2`
+ * - `kernel.kptr_restrict = 2`
+ * - `kernel.dmesg_restrict = 1`
+ * - `net.ipv4.tcp_syncookies = 1`
+ */
 export function generateKernelHardening(): string {
   return `kernel.randomize_va_space = 2
 kernel.kptr_restrict = 2
@@ -64,6 +73,16 @@ net.ipv4.tcp_syncookies = 1
 `;
 }
 
+/**
+ * Produce an AppArmor profile tailored to a specific application name.
+ *
+ * The generated profile includes global tunables, standard abstractions, common capabilities,
+ * file path permissions for the executable, configuration, and log directories, and explicit
+ * denial rules for sensitive kernel and firmware paths.
+ *
+ * @param appName - The application name used to populate profile identifiers and file paths; defaults to `custom-app`.
+ * @returns The AppArmor profile contents as a text block for the given `appName`.
+ */
 export function generateAppArmorProfile(appName: string = 'custom-app'): string {
   return `#include <tunables/global>
 

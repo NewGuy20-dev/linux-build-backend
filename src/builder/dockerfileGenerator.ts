@@ -74,6 +74,12 @@ function generateSecuritySetup(spec: BuildSpec, distro: string): string[] {
   return lines;
 }
 
+/**
+ * Generate RUN lines to enable or register post-install services for the configured init system.
+ *
+ * @param spec - BuildSpec whose `init` selects the init system (defaults to `systemd`) and whose `postInstall.services` lists services to enable.
+ * @returns An array of Dockerfile shell lines (or comment placeholders) that enable or register each service for the selected init system.
+ */
 function generateServiceSetup(spec: BuildSpec): string[] {
   const lines: string[] = [];
   const init = spec.init || 'systemd';
@@ -99,6 +105,19 @@ function generateServiceSetup(spec: BuildSpec): string[] {
   return lines;
 }
 
+/**
+ * Produce Dockerfile instruction lines for optional extras (boot splash, dotfiles, DNS over HTTPS, MAC randomization).
+ *
+ * Adds RUN commands and safe-fail comments to install and configure enabled extras from the build spec:
+ * - Plymouth boot splash when `spec.customization?.bootloader?.plymouth` is true.
+ * - Clone and run dotfiles when `spec.customization?.dotfiles?.enabled` and a validated repo URL is provided.
+ * - DNS-over-HTTPS stub resolver when `spec.defaults?.dnsOverHttps` is true.
+ * - NetworkManager MAC randomization when `spec.defaults?.macRandomization` is true.
+ *
+ * @param spec - The build specification controlling which extras to enable and their settings.
+ * @param distro - Target distribution identifier used to resolve package names and the package manager.
+ * @returns An array of Dockerfile lines (RUN instructions and warning comments) to apply the requested extras.
+ */
 function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
   const lines: string[] = [];
   const pm = getPackageManager(distro);
@@ -146,6 +165,17 @@ function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
   return lines;
 }
 
+/**
+ * Generate the complete Dockerfile text for a given build specification and distro.
+ *
+ * Produces Dockerfile instructions tailored to the specified distro and the provided
+ * BuildSpec, including package installation, distro-specific setup, shell/security/service
+ * configuration, and optional extras. Any resolution warnings are emitted as comment lines
+ * at the top of the Dockerfile.
+ *
+ * @param spec - BuildSpec describing the desired image configuration and customizations
+ * @returns The assembled Dockerfile content as a single string with newline-separated instructions
+ */
 function generateDistroDockerfile(spec: BuildSpec): string {
   const distro = spec.base;
   const image = DOCKER_IMAGES[distro];
