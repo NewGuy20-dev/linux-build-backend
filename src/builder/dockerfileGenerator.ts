@@ -1,5 +1,6 @@
 import { BuildSpec } from '../ai/schema';
 import { resolvePackages, getPackageManager } from './packageMaps';
+import { validateGitUrl } from '../utils/sanitizer';
 
 const DOCKER_IMAGES: Record<string, string> = {
   arch: 'archlinux:latest',
@@ -98,6 +99,53 @@ function generateServiceSetup(spec: BuildSpec): string[] {
   return lines;
 }
 
+function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
+  const lines: string[] = [];
+  const pm = getPackageManager(distro);
+
+  // Plymouth boot splash
+  if (spec.customization?.bootloader?.plymouth) {
+    const { packages } = resolvePackages(['plymouth'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN plymouth-set-default-theme spinner 2>/dev/null || true');
+    }
+  }
+
+  // Dotfiles - validate URL before cloning
+  if (spec.customization?.dotfiles?.enabled && spec.customization.dotfiles.repo) {
+    try {
+      const validatedUrl = validateGitUrl(spec.customization.dotfiles.repo);
+      lines.push(`RUN git clone --depth 1 '${validatedUrl}' /root/.dotfiles 2>/dev/null || true`);
+      lines.push('RUN cd /root/.dotfiles && [ -f install.sh ] && bash install.sh || true');
+    } catch (e) {
+      lines.push(`# WARNING: Dotfiles URL validation failed - skipped`);
+    }
+  }
+
+  // DNS over HTTPS
+  if (spec.defaults?.dnsOverHttps) {
+    const { packages } = resolvePackages(['stubby'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.head 2>/dev/null || true');
+    }
+  }
+
+  // MAC randomization
+  if (spec.defaults?.macRandomization) {
+    const { packages } = resolvePackages(['macchanger'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN echo "[connection]" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
+      lines.push('RUN echo "wifi.cloned-mac-address=random" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
+      lines.push('RUN echo "ethernet.cloned-mac-address=random" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
+    }
+  }
+
+  return lines;
+}
+
 function generateDistroDockerfile(spec: BuildSpec): string {
   const distro = spec.base;
   const image = DOCKER_IMAGES[distro];
@@ -156,6 +204,9 @@ function generateDistroDockerfile(spec: BuildSpec): string {
 
   // Service setup
   lines.push(...generateServiceSetup(spec));
+
+  // Extras: Plymouth, dotfiles, DNS over HTTPS, MAC randomization
+  lines.push(...generateExtrasSetup(spec, distro));
 
   // Set default shell if not bash
   if (spec.customization?.shell && spec.customization.shell !== 'bash') {

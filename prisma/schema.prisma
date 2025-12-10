@@ -16,11 +16,15 @@ model UserBuild {
   baseDistro     String
   spec           Json
   
+  // Ownership for IDOR prevention
+  ownerKey       String?         // API key hash or IP address
+  
   // New fields for enhanced schema
   kernelVersion  String?
   initSystem     String?
   architecture   String?         @default("x86_64")
   securityLevel  String?         // minimal, standard, hardened
+  featuresJson   Json?           // Full expanded spec with resolved packages
   buildDuration  Int?            // seconds
   warnings       String[]        @default([])
   

@@ -1,17 +1,19 @@
 import prisma from '../db/db';
 import { broadcast } from '../ws/websocket';
+import { maskSensitiveData } from '../utils/sanitizer';
 
 export const log = async (buildId: string, message: string) => {
-  console.log(`[${buildId}] ${message}`);
+  const safeMessage = maskSensitiveData(message);
+  console.log(`[${buildId}] ${safeMessage}`);
 
   // Save to database
   await prisma.buildLog.create({
     data: {
       buildId,
-      message,
+      message: safeMessage,
     },
   });
 
   // Broadcast to WebSocket clients
-  broadcast(JSON.stringify({ buildId, message }));
+  broadcast(JSON.stringify({ buildId, message: safeMessage }));
 };

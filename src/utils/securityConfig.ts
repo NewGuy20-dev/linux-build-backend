@@ -63,3 +63,25 @@ kernel.dmesg_restrict = 1
 net.ipv4.tcp_syncookies = 1
 `;
 }
+
+export function generateAppArmorProfile(appName: string = 'custom-app'): string {
+  return `#include <tunables/global>
+
+profile ${appName} flags=(attach_disconnected) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  capability net_bind_service,
+  capability setuid,
+  capability setgid,
+
+  /usr/bin/${appName} mr,
+  /etc/${appName}/** r,
+  /var/log/${appName}/** rw,
+  /tmp/** rw,
+
+  deny /proc/*/mem rw,
+  deny /sys/firmware/** r,
+}
+`;
+}

@@ -176,7 +176,7 @@ export const buildSchema = z.object({
   kernel: kernelSchema,
   init: initEnum.optional().default('systemd'),
   filesystem: filesystemSchema,
-  display: displaySchema,
+  display: displaySchema.nullable().optional(),
   packages: packagesSchema,
   securityFeatures: securityFeaturesSchema,
   services: servicesSchema,

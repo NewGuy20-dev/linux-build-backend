@@ -5,20 +5,43 @@ import { generateId } from '../utils/id';
 import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
 import { generateBuildSpec } from '../ai/ollama';
+import { validatePathWithinDir } from '../utils/sanitizer';
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+
+const ARTIFACTS_DIR = path.resolve('artifacts');
+
+// Generate owner key from API key or IP
+const getOwnerKey = (req: Request): string => {
+  if (req.apiKey) {
+    return crypto.createHash('sha256').update(req.apiKey).digest('hex').slice(0, 32);
+  }
+  // Fallback to IP (less secure but better than nothing)
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  return crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
+};
+
+// Check if requester owns the build
+const checkBuildOwnership = async (buildId: string, req: Request): Promise<boolean> => {
+  const build = await prisma.userBuild.findUnique({
+    where: { id: buildId },
+    select: { ownerKey: true },
+  });
+  if (!build) return false;
+  // Allow access if no owner set (legacy builds) or owner matches
+  if (!build.ownerKey) return true;
+  return build.ownerKey === getOwnerKey(req);
+};
 
 export const startBuild = async (req: Request, res: Response) => {
   try {
     let buildSpec: BuildSpec;
 
-    // Check if request is a prompt (string) or direct JSON spec
     if (req.body.prompt && typeof req.body.prompt === 'string') {
-      // Frontend sent a prompt - generate spec via AI
       console.log('Received prompt, generating build spec via AI...');
       buildSpec = await generateBuildSpec(req.body.prompt);
     } else {
-      // Frontend sent a direct JSON spec
       buildSpec = buildSchema.parse(req.body);
     }
 
@@ -27,12 +50,14 @@ export const startBuild = async (req: Request, res: Response) => {
       packages: normalizePackages(buildSpec.packages),
     };
     const buildId = generateId();
+    const ownerKey = getOwnerKey(req);
 
     await prisma.userBuild.create({
       data: {
         id: buildId,
         baseDistro: buildSpec.base,
         spec: normalizedSpec as any,
+        ownerKey,
       },
     });
 
@@ -42,7 +67,9 @@ export const startBuild = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Error starting build:', error);
     if (error instanceof Error) {
-      res.status(400).json({ error: 'Invalid build specification', details: error.message, stack: (error as any).issues });
+      // Don't expose internal details in production
+      const details = process.env.NODE_ENV === 'development' ? error.message : undefined;
+      res.status(400).json({ error: 'Invalid build specification', details });
     } else {
       res.status(400).json({ error: 'Invalid build specification' });
     }
@@ -52,32 +79,42 @@ export const startBuild = async (req: Request, res: Response) => {
 export const getBuildStatus = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    
+    // Check ownership - return 404 to prevent enumeration
+    if (!await checkBuildOwnership(id, req)) {
+      res.status(404).json({ error: 'Build not found' });
+      return;
+    }
+
     const build = await prisma.userBuild.findUnique({
       where: { id },
       include: { logs: true, artifacts: true },
     });
 
-    if (build) {
-      const downloadUrls: {
-        dockerImage?: string;
-        dockerTarDownloadUrl?: string;
-        isoDownloadUrl?: string;
-      } = {};
-
-      for (const artifact of build.artifacts) {
-        if (artifact.fileType === 'docker-image-ref') {
-          downloadUrls.dockerImage = artifact.url;
-        } else if (artifact.fileType === 'docker-image') {
-          downloadUrls.dockerTarDownloadUrl = `/api/build/download/${id}/docker`;
-        } else if (artifact.fileType === 'iso') {
-          downloadUrls.isoDownloadUrl = `/api/build/download/${id}/iso`;
-        }
-      }
-
-      res.status(200).json({ ...build, downloadUrls });
-    } else {
+    if (!build) {
       res.status(404).json({ error: 'Build not found' });
+      return;
     }
+
+    const downloadUrls: {
+      dockerImage?: string;
+      dockerTarDownloadUrl?: string;
+      isoDownloadUrl?: string;
+    } = {};
+
+    for (const artifact of build.artifacts) {
+      if (artifact.fileType === 'docker-image-ref') {
+        downloadUrls.dockerImage = artifact.url;
+      } else if (artifact.fileType === 'docker-image') {
+        downloadUrls.dockerTarDownloadUrl = `/api/build/download/${id}/docker`;
+      } else if (artifact.fileType === 'iso') {
+        downloadUrls.isoDownloadUrl = `/api/build/download/${id}/iso`;
+      }
+    }
+
+    // Don't expose ownerKey in response
+    const { ownerKey, ...safeData } = build as any;
+    res.status(200).json({ ...safeData, downloadUrls });
   } catch (error) {
     console.error(`Error getting build status for ID ${req.params.id}:`, error);
     res.status(500).json({ error: 'Internal server error' });
@@ -87,6 +124,12 @@ export const getBuildStatus = async (req: Request, res: Response) => {
 export const getBuildArtifact = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    
+    if (!await checkBuildOwnership(id, req)) {
+      res.status(404).json({ error: 'Artifact not found' });
+      return;
+    }
+
     const artifact = await prisma.buildArtifact.findFirst({
       where: { buildId: id },
     });
@@ -111,6 +154,11 @@ export const downloadArtifact = async (req: Request, res: Response) => {
       return;
     }
 
+    if (!await checkBuildOwnership(id, req)) {
+      res.status(404).json({ error: 'Artifact not found' });
+      return;
+    }
+
     const fileType = type === 'iso' ? 'iso' : 'docker-image';
     const artifact = await prisma.buildArtifact.findFirst({
       where: { buildId: id, fileType },
@@ -130,7 +178,15 @@ export const downloadArtifact = async (req: Request, res: Response) => {
       return;
     }
 
-    const filePath = artifact.url;
+    // Path traversal prevention
+    let filePath: string;
+    try {
+      filePath = validatePathWithinDir(artifact.url, ARTIFACTS_DIR);
+    } catch {
+      res.status(404).json({ error: 'Artifact file not found on server' });
+      return;
+    }
+
     if (!fs.existsSync(filePath)) {
       res.status(404).json({ error: 'Artifact file not found on server' });
       return;
@@ -164,7 +220,8 @@ export const generateFromPrompt = async (req: Request, res: Response) => {
     if (error instanceof SyntaxError) {
       res.status(500).json({ error: 'AI returned invalid JSON' });
     } else if (error instanceof Error) {
-      res.status(500).json({ error: 'Failed to generate build spec', details: error.message });
+      const details = process.env.NODE_ENV === 'development' ? error.message : undefined;
+      res.status(500).json({ error: 'Failed to generate build spec', details });
     } else {
       res.status(500).json({ error: 'Failed to generate build spec' });
     }
