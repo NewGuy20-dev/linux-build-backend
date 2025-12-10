@@ -68,7 +68,7 @@ export const startBuild = async (req: Request, res: Response) => {
       await prisma.userBuild.update({
         where: { id: buildId },
         data: { status: 'FAILED' },
-      }).catch((e) => logger.error({ buildId, error: e.message }, 'Failed to update build status'));
+      }).catch((err: Error) => logger.error({ buildId, error: err.message }, 'Failed to update build status'));
     });
 
     res.status(202).json({ buildId, spec: normalizedSpec });
