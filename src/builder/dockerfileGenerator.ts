@@ -74,6 +74,12 @@ function generateSecuritySetup(spec: BuildSpec, distro: string): string[] {
   return lines;
 }
 
+/**
+ * Produce Dockerfile RUN/comment lines that enable or register post-install services for the spec's init system.
+ *
+ * @param spec - Build specification whose `init` selects the init system (defaults to `systemd`) and whose `postInstall?.services` lists service names to enable
+ * @returns An array of Dockerfile instruction strings that enable or register each requested service for the chosen init system (comments are emitted for init systems that require manual handling)
+ */
 function generateServiceSetup(spec: BuildSpec): string[] {
   const lines: string[] = [];
   const init = spec.init || 'systemd';
@@ -99,6 +105,13 @@ function generateServiceSetup(spec: BuildSpec): string[] {
   return lines;
 }
 
+/**
+ * Create Dockerfile snippet lines for optional extras (boot splash, dotfiles, DNS-over-HTTPS, MAC randomization).
+ *
+ * @param spec - Build specification controlling which extras are enabled and their configuration
+ * @param distro - Target distribution identifier used to resolve package names and package manager commands
+ * @returns An array of Dockerfile lines (strings) to apply the enabled extras; may include comment warnings if validation fails
+ */
 function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
   const lines: string[] = [];
   const pm = getPackageManager(distro);
@@ -146,6 +159,12 @@ function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
   return lines;
 }
 
+/**
+ * Compose a Dockerfile tailored to the provided BuildSpec and its base distribution.
+ *
+ * @param spec - BuildSpec describing the base distribution, packages, customization, security and post-install options; generated Dockerfile includes distro-specific initialization, package installation, shell/security/service/extras setup, and warning comments when applicable.
+ * @returns The assembled Dockerfile content as a single string with newline-separated lines.
+ */
 function generateDistroDockerfile(spec: BuildSpec): string {
   const distro = spec.base;
   const image = DOCKER_IMAGES[distro];

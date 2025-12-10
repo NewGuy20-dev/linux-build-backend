@@ -9,7 +9,12 @@ import { DOCKER_IMAGES } from './dockerfileGenerator';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
-// Validate base distro against allowlist
+/**
+ * Ensures the provided base distribution is supported by the toolchain.
+ *
+ * @param distro - The base distribution identifier to validate (must be a key in DOCKER_IMAGES)
+ * @throws Error if the distribution is not supported
+ */
 function validateBaseDistro(distro: string): void {
   if (!(distro in DOCKER_IMAGES)) {
     throw new Error(`Unsupported base distribution: ${distro}`);
@@ -99,6 +104,12 @@ zfs create rpool/home
   return script;
 }
 
+/**
+ * Generate a shell script that performs post-installation configuration described in the spec.
+ *
+ * @param spec - Build specification containing post-install settings (e.g., systemTuning.swappiness, defaults.trim, custom scripts, and services to enable)
+ * @returns A string containing a POSIX-compatible shell script that applies sysctl tuning, enables fstrim when requested, embeds custom script entries, and enables listed services (attempting systemd then rc-update)
+ */
 function generatePostInstallScript(spec: BuildSpec): string {
   const lines: string[] = ['#!/bin/bash', 'set -e'];
 
