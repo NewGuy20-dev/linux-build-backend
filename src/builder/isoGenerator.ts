@@ -91,6 +91,15 @@ zfs create rpool/home
   return script;
 }
 
+/**
+ * Generate a bash post-installation script from the provided build specification.
+ *
+ * @param spec - BuildSpec containing optional fields used to shape the script:
+ *   - postInstall.systemTuning.swappiness: if set, writes a vm.swappiness entry to /etc/sysctl.conf
+ *   - defaults.trim: if true, enables the fstrim.timer
+ *   - postInstall.scripts: additional custom script lines to include (prefixed as comments)
+ *   - postInstall.services: service names to enable via systemd or rc-update
+ * @returns The generated bash script as a single string. The script begins with a shebang and `set -e`, applies the configured system tuning, enables fstrim when requested, embeds custom script lines, and enables the listed services (with fallbacks).
 function generatePostInstallScript(spec: BuildSpec): string {
   const lines: string[] = ['#!/bin/bash', 'set -e'];
 
