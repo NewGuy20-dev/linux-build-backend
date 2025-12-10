@@ -19,6 +19,10 @@ model UserBuild {
   // Ownership for IDOR prevention
   ownerKey       String?         // API key hash or IP address
   
+  // Multi-tenancy
+  tenantId       String?
+  tenant         Tenant?         @relation(fields: [tenantId], references: [id])
+  
   // New fields for enhanced schema
   kernelVersion  String?
   initSystem     String?
@@ -35,6 +39,7 @@ model UserBuild {
   @@index([ownerKey])
   @@index([createdAt])
   @@index([status, createdAt])
+  @@index([tenantId])
 }
 
 model BuildLog {
@@ -75,4 +80,46 @@ model ApiKey {
   scopes      String[]  @default(["build:read", "build:write"])
   rateLimit   Int       @default(100)  // requests per minute
   metadata    Json?
+  tenantId    String?
+  tenant      Tenant?   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Tenant {
+  id          String    @id @default(cuid())
+  name        String
+  slug        String    @unique
+  createdAt   DateTime  @default(now())
+  tier        String    @default("free")  // free, standard, premium
+  settings    Json?
+  builds      UserBuild[]
+  apiKeys     ApiKey[]
+  webhooks    Webhook[]
+}
+
+model Webhook {
+  id          String    @id @default(cuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  url         String
+  secret      String    // For HMAC signature
+  events      String[]  @default(["build.completed", "build.failed"])
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  lastTriggeredAt DateTime?
+
+  @@index([tenantId])
+}
+
+model ConversationContext {
+  id          String    @id @default(cuid())
+  sessionId   String    @unique
+  messages    Json      @default("[]")
+  buildSpec   Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  expiresAt   DateTime
+
+  @@index([sessionId])
 }
