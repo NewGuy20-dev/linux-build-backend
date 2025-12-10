@@ -30,6 +30,11 @@ model UserBuild {
   
   logs           BuildLog[]
   artifacts      BuildArtifact[]
+
+  @@index([status])
+  @@index([ownerKey])
+  @@index([createdAt])
+  @@index([status, createdAt])
 }
 
 model BuildLog {
@@ -39,6 +44,9 @@ model BuildLog {
   level     String    @default("info") // info, warn, error
   build     UserBuild @relation(fields: [buildId], references: [id])
   buildId   String
+
+  @@index([buildId])
+  @@index([buildId, level])
 }
 
 model BuildArtifact {
@@ -51,6 +59,8 @@ model BuildArtifact {
   checksum  String?   // sha256
   build     UserBuild @relation(fields: [buildId], references: [id])
   buildId   String
+
+  @@index([buildId])
 }
 
 model ApiKey {
