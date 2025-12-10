@@ -52,3 +52,17 @@ model BuildArtifact {
   build     UserBuild @relation(fields: [buildId], references: [id])
   buildId   String
 }
+
+model ApiKey {
+  id          String    @id @default(cuid())
+  name        String
+  keyHash     String    @unique  // SHA-256 hash of the key
+  keyPrefix   String              // First 8 chars for identification
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  lastUsedAt  DateTime?
+  revokedAt   DateTime?
+  scopes      String[]  @default(["build:read", "build:write"])
+  rateLimit   Int       @default(100)  // requests per minute
+  metadata    Json?
+}
