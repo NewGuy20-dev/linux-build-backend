@@ -7,7 +7,12 @@ const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '30000', 10);
 const MAX_RETRIES = 3;
 const MAX_PROMPT_LENGTH = 2000;
 
-// Sanitize user prompt to mitigate injection attacks
+/**
+ * Sanitizes a user-supplied prompt by truncating it and removing common prompt-injection patterns.
+ *
+ * @param prompt - The raw user prompt that may contain instructions, system markers, or markup
+ * @returns The sanitized prompt truncated to MAX_PROMPT_LENGTH with common injection patterns removed and whitespace trimmed
+ */
 function sanitizePrompt(prompt: string): string {
   // Truncate to max length
   let sanitized = prompt.slice(0, MAX_PROMPT_LENGTH);
@@ -23,6 +28,13 @@ function sanitizePrompt(prompt: string): string {
   return sanitized.trim();
 }
 
+/**
+ * Send a prompt to the configured Ollama API and return the model's response text.
+ *
+ * @param prompt - The prompt to send to Ollama (should be pre-sanitized and within allowed length)
+ * @returns The raw response string returned by the Ollama model
+ * @throws If the HTTP request fails or the Ollama response has a non-OK status
+ */
 async function callOllama(prompt: string): Promise<string> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT);
@@ -50,6 +62,15 @@ async function callOllama(prompt: string): Promise<string> {
   }
 }
 
+/**
+ * Extracts and parses the first balanced JSON object found within a string.
+ *
+ * @param text - The input text to search for a JSON object.
+ * @returns The parsed object from the first balanced JSON object found in `text`.
+ * @throws Error with message "Response too large" if `text` is longer than 100000 characters.
+ * @throws Error with message "No valid JSON found in response" if no balanced JSON object is found.
+ * @throws SyntaxError if the located JSON slice cannot be parsed by `JSON.parse`.
+ */
 function extractJson(text: string): object {
   if (text.length > 100000) {
     throw new Error('Response too large');
@@ -73,6 +94,15 @@ function extractJson(text: string): object {
   throw new Error('No valid JSON found in response');
 }
 
+/**
+ * Generate a validated BuildSpec from a user's prompt.
+ *
+ * Sanitizes the provided prompt, queries the model to produce JSON, extracts the first JSON object from the response, and validates it against the build schema.
+ *
+ * @param userPrompt - The raw user-provided prompt to convert into a build specification
+ * @returns The validated BuildSpec parsed from the model's JSON response
+ * @throws Error if a valid JSON BuildSpec cannot be produced or validated after the configured retry attempts
+ */
 export async function generateBuildSpec(userPrompt: string): Promise<BuildSpec> {
   const sanitizedPrompt = sanitizePrompt(userPrompt);
   let lastError: Error | null = null;

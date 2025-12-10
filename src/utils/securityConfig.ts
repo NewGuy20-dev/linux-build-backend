@@ -56,6 +56,15 @@ MaxAuthTries 3
 `;
 }
 
+/**
+ * Generates a sysctl configuration snippet that applies recommended kernel and network hardening settings.
+ *
+ * @returns A string containing newline-separated sysctl directives:
+ * - `kernel.randomize_va_space = 2`
+ * - `kernel.kptr_restrict = 2`
+ * - `kernel.dmesg_restrict = 1`
+ * - `net.ipv4.tcp_syncookies = 1`
+ */
 export function generateKernelHardening(): string {
   return `kernel.randomize_va_space = 2
 kernel.kptr_restrict = 2
@@ -67,10 +76,23 @@ net.ipv4.tcp_syncookies = 1
 // AppArmor profile names: alphanumeric, underscores, hyphens, dots, max 64 chars
 const APPARMOR_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/;
 
+/**
+ * Checks whether a string is a valid AppArmor profile name.
+ *
+ * @param name - The profile name to validate; must start with a letter, may contain letters, digits, dots, underscores, or hyphens, and be at most 64 characters long
+ * @returns `true` if `name` matches AppArmor naming rules, `false` otherwise
+ */
 function validateAppArmorName(name: string): boolean {
   return APPARMOR_NAME_PATTERN.test(name);
 }
 
+/**
+ * Generate an AppArmor profile for the specified application name.
+ *
+ * @param appName - The profile name to use; must start with a letter and may contain letters, digits, dot, underscore or hyphen, up to 64 characters
+ * @returns The complete AppArmor profile as a string, ready to be written to a profile file
+ * @throws Error if `appName` does not match the AppArmor profile name pattern
+ */
 export function generateAppArmorProfile(appName: string = 'custom-app'): string {
   if (!validateAppArmorName(appName)) {
     throw new Error(`Invalid AppArmor profile name: ${appName}`);
