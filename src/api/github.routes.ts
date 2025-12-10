@@ -3,6 +3,8 @@ import { createHmac, timingSafeEqual } from 'crypto';
 import { addBuildJob } from '../queue/buildQueue';
 import { logger } from '../utils/logger';
 import { createId } from '@paralleldrive/cuid2';
+import { buildSchema } from '../ai/schema';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 
@@ -16,18 +18,6 @@ const verifyGitHubSignature = (payload: string, signature: string | undefined, s
   }
 };
 
-/**
- * @openapi
- * /github/webhook:
- *   post:
- *     summary: GitHub webhook endpoint for triggering builds
- *     tags: [GitHub]
- *     responses:
- *       200:
- *         description: Webhook processed
- *       401:
- *         description: Invalid signature
- */
 router.post('/github/webhook', async (req: Request, res: Response) => {
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!secret) {
@@ -48,16 +38,22 @@ router.post('/github/webhook', async (req: Request, res: Response) => {
 
   logger.info({ event, repo: repository?.full_name, ref }, 'GitHub webhook received');
 
-  // Handle workflow_dispatch or push events
   if (event === 'workflow_dispatch' || event === 'push') {
     const buildId = createId();
     
-    // Extract build spec from .linux-builder.json in repo (placeholder)
-    const spec = req.body.inputs?.spec || { base: 'ubuntu', packages: [] };
+    // Validate build spec from inputs
+    let spec;
+    try {
+      const rawSpec = req.body.inputs?.spec || { base: 'ubuntu', packages: [] };
+      spec = buildSchema.parse(typeof rawSpec === 'string' ? JSON.parse(rawSpec) : rawSpec);
+    } catch {
+      res.status(400).json({ error: 'Invalid build specification' });
+      return;
+    }
 
     await addBuildJob({
       buildId,
-      spec: spec as any,
+      spec,
       apiKeyHash: `github:${sender?.login || 'unknown'}`,
     });
 
@@ -68,14 +64,8 @@ router.post('/github/webhook', async (req: Request, res: Response) => {
   res.status(200).json({ message: 'Event ignored' });
 });
 
-/**
- * @openapi
- * /github/dispatch:
- *   post:
- *     summary: Trigger GitHub Actions workflow
- *     tags: [GitHub]
- */
-router.post('/github/dispatch', async (req: Request, res: Response) => {
+// Requires authentication - Fix for Critical Finding 2
+router.post('/github/dispatch', authMiddleware, async (req: Request, res: Response) => {
   const { owner, repo, workflow_id, ref = 'main', inputs } = req.body;
   const token = process.env.GITHUB_TOKEN;
 
@@ -84,9 +74,15 @@ router.post('/github/dispatch', async (req: Request, res: Response) => {
     return;
   }
 
+  // Validate inputs
+  if (!owner || !repo || !workflow_id) {
+    res.status(400).json({ error: 'Missing required fields: owner, repo, workflow_id' });
+    return;
+  }
+
   try {
     const response = await fetch(
-      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/${workflow_id}/dispatches`,
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflow_id)}/dispatches`,
       {
         method: 'POST',
         headers: {

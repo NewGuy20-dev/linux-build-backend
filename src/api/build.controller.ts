@@ -6,6 +6,7 @@ import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
 import { generateBuildSpec } from '../ai/ollama';
 import { validatePathWithinDir, maskSensitiveData } from '../utils/sanitizer';
+import { logger } from '../utils/logger';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -39,7 +40,7 @@ export const startBuild = async (req: Request, res: Response) => {
     let buildSpec: BuildSpec;
 
     if (req.body.prompt && typeof req.body.prompt === 'string') {
-      console.log('Received prompt, generating build spec via AI...');
+      logger.info('Received prompt, generating build spec via AI');
       buildSpec = await generateBuildSpec(req.body.prompt);
     } else {
       buildSpec = buildSchema.parse(req.body);
@@ -63,16 +64,16 @@ export const startBuild = async (req: Request, res: Response) => {
 
     // Fire-and-forget with error handling
     runBuildLifecycle(normalizedSpec, buildId).catch(async (error) => {
-      console.error(`Build lifecycle failed for ${buildId}:`, maskSensitiveData(error.message));
+      logger.error({ buildId, error: maskSensitiveData(error.message) }, 'Build lifecycle failed');
       await prisma.userBuild.update({
         where: { id: buildId },
         data: { status: 'FAILED' },
-      }).catch(console.error);
+      }).catch((e) => logger.error({ buildId, error: e.message }, 'Failed to update build status'));
     });
 
     res.status(202).json({ buildId, spec: normalizedSpec });
   } catch (error) {
-    console.error('Error starting build:', error);
+    logger.error({ error }, 'Error starting build');
     if (error instanceof Error) {
       // Don't expose internal details in production
       const details = process.env.NODE_ENV === 'development' ? error.message : undefined;
@@ -123,7 +124,7 @@ export const getBuildStatus = async (req: Request, res: Response) => {
     const { ownerKey, ...safeData } = build as any;
     res.status(200).json({ ...safeData, downloadUrls });
   } catch (error) {
-    console.error(`Error getting build status for ID ${req.params.id}:`, error);
+    logger.error({ buildId: req.params.id, error }, 'Error getting build status');
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -147,7 +148,7 @@ export const getBuildArtifact = async (req: Request, res: Response) => {
       res.status(404).json({ error: 'Artifact not found' });
     }
   } catch (error) {
-    console.error(`Error getting build artifact for ID ${req.params.id}:`, error);
+    logger.error({ buildId: req.params.id, error }, 'Error getting build artifact');
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -206,7 +207,7 @@ export const downloadArtifact = async (req: Request, res: Response) => {
     const fileStream = fs.createReadStream(filePath);
     fileStream.pipe(res);
   } catch (error) {
-    console.error(`Error downloading artifact for ID ${req.params.id}:`, error);
+    logger.error({ buildId: req.params.id, error }, 'Error downloading artifact');
     res.status(500).json({ error: 'Internal server error' });
   }
 };
@@ -223,7 +224,7 @@ export const generateFromPrompt = async (req: Request, res: Response) => {
     const buildSpec = await generateBuildSpec(prompt);
     res.status(200).json({ spec: buildSpec });
   } catch (error) {
-    console.error('Error generating build spec from prompt:', error);
+    logger.error({ error }, 'Error generating build spec from prompt');
     if (error instanceof SyntaxError) {
       res.status(500).json({ error: 'AI returned invalid JSON' });
     } else if (error instanceof Error) {

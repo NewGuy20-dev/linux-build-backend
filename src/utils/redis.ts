@@ -3,6 +3,11 @@ import { logger } from './logger';
 
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379';
 
+// Warn if not using TLS in production
+if (process.env.NODE_ENV === 'production' && !REDIS_URL.startsWith('rediss://')) {
+  logger.warn('Redis connection not using TLS in production - consider using rediss://');
+}
+
 export const redis = new Redis(REDIS_URL, {
   maxRetriesPerRequest: null, // Required for BullMQ
   enableReadyCheck: false,

@@ -21,34 +21,35 @@ const getEnvApiKeys = (): Set<string> => {
   return new Set(keys);
 };
 
-// In-memory cache for validated keys
+// Cache by hash, not raw key - Fix for Finding 5
 const cache = new Map<string, { valid: boolean; scopes?: string[]; id?: string; expires: number }>();
 const CACHE_TTL = 60_000; // 1 minute
 
-const validateKey = async (key: string): Promise<{ valid: boolean; scopes?: string[]; id?: string }> => {
-  const cached = cache.get(key);
+const validateKey = async (key: string): Promise<{ valid: boolean; scopes?: string[]; id?: string; hash: string }> => {
+  const keyHash = hashApiKey(key);
+  const cached = cache.get(keyHash);
   if (cached && cached.expires > Date.now()) {
-    return { valid: cached.valid, scopes: cached.scopes, id: cached.id };
+    return { valid: cached.valid, scopes: cached.scopes, id: cached.id, hash: keyHash };
   }
 
   // Try database first (for lbk_ prefixed keys)
   if (key.startsWith('lbk_')) {
     const result = await validateApiKey(prisma, key);
-    cache.set(key, { ...result, expires: Date.now() + CACHE_TTL });
-    return result;
+    cache.set(keyHash, { ...result, expires: Date.now() + CACHE_TTL });
+    return { ...result, hash: keyHash };
   }
 
   // Fallback to env-based keys
   const envKeys = getEnvApiKeys();
   const valid = envKeys.has(key);
-  cache.set(key, { valid, expires: Date.now() + CACHE_TTL });
-  return { valid };
+  cache.set(keyHash, { valid, expires: Date.now() + CACHE_TTL });
+  return { valid, hash: keyHash };
 };
 
 export const authMiddleware = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-  // Skip auth in dev if no keys configured
+  // Only skip auth if explicitly disabled AND in development
   const envKeys = getEnvApiKeys();
-  if (envKeys.size === 0 && process.env.NODE_ENV === 'development') {
+  if (process.env.DISABLE_AUTH === 'true' && process.env.NODE_ENV === 'development' && envKeys.size === 0) {
     req.apiKeyValid = false;
     return next();
   }
@@ -74,7 +75,7 @@ export const authMiddleware = async (req: Request, res: Response, next: NextFunc
     return;
   }
 
-  req.apiKey = hashApiKey(token);
+  req.apiKey = result.hash;
   req.apiKeyId = result.id;
   req.apiKeyValid = true;
   req.scopes = result.scopes;
@@ -95,7 +96,7 @@ export const optionalAuth = async (req: Request, res: Response, next: NextFuncti
   if (token) {
     const result = await validateKey(token);
     if (result.valid) {
-      req.apiKey = hashApiKey(token);
+      req.apiKey = result.hash;
       req.apiKeyId = result.id;
       req.apiKeyValid = true;
       req.scopes = result.scopes;

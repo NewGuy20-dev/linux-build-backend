@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { logger } from './logger';
 
@@ -16,6 +16,37 @@ const signPayload = (payload: string, secret: string): string => {
   return createHmac('sha256', secret).update(payload).digest('hex');
 };
 
+// SSRF Protection - validate webhook URLs
+const isValidWebhookUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    
+    // Require HTTPS
+    if (parsed.protocol !== 'https:') return false;
+    
+    const hostname = parsed.hostname.toLowerCase();
+    
+    // Block localhost
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') return false;
+    
+    // Block private IP ranges
+    if (/^10\./.test(hostname)) return false;
+    if (/^192\.168\./.test(hostname)) return false;
+    if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(hostname)) return false;
+    if (/^169\.254\./.test(hostname)) return false;
+    
+    // Block internal domains
+    if (hostname.endsWith('.internal') || hostname.endsWith('.local') || hostname.endsWith('.localhost')) return false;
+    
+    // Block metadata endpoints
+    if (hostname === '169.254.169.254') return false;
+    
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 export const triggerWebhooks = async (tenantId: string, event: WebhookEvent, data: Record<string, unknown>) => {
   const webhooks = await prisma.webhook.findMany({
     where: { tenantId, active: true, events: { has: event } },
@@ -30,6 +61,12 @@ export const triggerWebhooks = async (tenantId: string, event: WebhookEvent, dat
   const body = JSON.stringify(payload);
 
   for (const webhook of webhooks) {
+    // SSRF protection
+    if (!isValidWebhookUrl(webhook.url)) {
+      logger.warn({ webhookId: webhook.id, url: webhook.url }, 'Blocked webhook to invalid URL');
+      continue;
+    }
+
     const signature = signPayload(body, webhook.secret);
 
     try {
@@ -56,7 +93,14 @@ export const triggerWebhooks = async (tenantId: string, event: WebhookEvent, dat
   }
 };
 
+// Timing-safe signature verification - Fix for Finding 4
 export const verifyWebhookSignature = (payload: string, signature: string, secret: string): boolean => {
   const expected = `sha256=${signPayload(payload, secret)}`;
-  return signature === expected;
+  try {
+    return timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+  } catch {
+    return false;
+  }
 };
+
+export { isValidWebhookUrl };

@@ -22,12 +22,16 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'"],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
     },
   },
   crossOriginEmbedderPolicy: false, // Allow embedding if needed
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
 }));
 
 // CORS configuration - restrict to allowed origins
@@ -48,9 +52,10 @@ app.use(cors({
   credentials: true,
 }));
 
-// Body parsing with size limits
+// Body parsing with size limits - stricter for build endpoints
+app.use('/api/build', express.json({ limit: '100kb' }));
 app.use(express.json({ limit: '1mb' }));
-app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 app.use((req, _res, next) => {
   // req.ip respects trust proxy setting

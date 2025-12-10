@@ -1,10 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs/promises';
-import * as path from 'path';
 import { saveArtifact, getArtifact, deleteArtifacts, getArtifactPath } from './artifactStorage';
 
 const TEST_DIR = './test-artifacts';
-const TEST_BUILD_ID = 'test-build-123';
+const TEST_BUILD_ID = 'clh3am8hi0000qwer1234abcd'; // Valid cuid2 format
 
 // Override ARTIFACT_DIR for tests
 process.env.ARTIFACT_DIR = TEST_DIR;
@@ -19,10 +18,20 @@ describe('artifactStorage', () => {
   });
 
   describe('getArtifactPath', () => {
-    it('returns correct path', () => {
-      const result = getArtifactPath('build-1', 'file.iso');
-      expect(result).toContain('build-1');
+    it('returns correct path for valid inputs', () => {
+      const result = getArtifactPath(TEST_BUILD_ID, 'file.iso');
+      expect(result).toContain(TEST_BUILD_ID);
       expect(result).toContain('file.iso');
+    });
+
+    it('rejects invalid build ID', () => {
+      expect(() => getArtifactPath('invalid!', 'file.iso')).toThrow('Invalid build ID');
+    });
+
+    it('prevents path traversal in filename', () => {
+      const result = getArtifactPath(TEST_BUILD_ID, '../../../etc/passwd');
+      expect(result).not.toContain('..');
+      expect(result).toContain('passwd');
     });
   });
 
@@ -47,7 +56,7 @@ describe('artifactStorage', () => {
     });
 
     it('returns null for missing artifact', async () => {
-      const result = await getArtifact('nonexistent', 'file.txt');
+      const result = await getArtifact(TEST_BUILD_ID, 'nonexistent.txt');
       expect(result).toBeNull();
     });
   });

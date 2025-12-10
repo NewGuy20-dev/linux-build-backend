@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { redis } from '../utils/redis';
 import { getMetrics, getContentType } from '../utils/metrics';
+import { apiRateLimit } from '../middleware/rateLimit';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -12,7 +13,8 @@ interface HealthStatus {
   checks: Record<string, { status: string; latency?: number }>;
 }
 
-router.get('/health', async (_req: Request, res: Response) => {
+// Rate limited health check
+router.get('/health', apiRateLimit, async (_req: Request, res: Response) => {
   const health: HealthStatus = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -43,11 +45,13 @@ router.get('/health', async (_req: Request, res: Response) => {
   res.status(statusCode).json(health);
 });
 
+// Lightweight liveness probe - no rate limit needed
 router.get('/health/live', (_req: Request, res: Response) => {
   res.status(200).json({ status: 'ok' });
 });
 
-router.get('/health/ready', async (_req: Request, res: Response) => {
+// Readiness probe with rate limit
+router.get('/health/ready', apiRateLimit, async (_req: Request, res: Response) => {
   try {
     await prisma.$queryRaw`SELECT 1`;
     res.status(200).json({ status: 'ready' });
@@ -56,7 +60,8 @@ router.get('/health/ready', async (_req: Request, res: Response) => {
   }
 });
 
-router.get('/metrics', async (_req: Request, res: Response) => {
+// Metrics endpoint with rate limit
+router.get('/metrics', apiRateLimit, async (_req: Request, res: Response) => {
   res.set('Content-Type', getContentType());
   res.send(await getMetrics());
 });

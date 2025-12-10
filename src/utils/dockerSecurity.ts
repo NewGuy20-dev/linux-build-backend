@@ -26,7 +26,7 @@ export const toSecurityArgs = (opts: DockerSecurityOptions): string[] => {
   return args;
 };
 
-// Combined args for docker run
+// Combined args for docker run with comprehensive security
 export const getDockerSecurityArgs = (): string[] => [
   '--security-opt=no-new-privileges:true',
   '--cap-drop=ALL',
@@ -34,5 +34,10 @@ export const getDockerSecurityArgs = (): string[] => [
   '--cap-add=SETUID',
   '--cap-add=SETGID',
   '--cap-add=DAC_OVERRIDE',
-  '--network=none', // no network during build for security
+  '--network=none',
+  '--memory=512m',
+  '--memory-swap=512m',
+  '--cpus=1.0',
+  '--pids-limit=100',
+  '--tmpfs=/tmp:noexec,nosuid,size=100m',
 ];
