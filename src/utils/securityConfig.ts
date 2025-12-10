@@ -64,7 +64,18 @@ net.ipv4.tcp_syncookies = 1
 `;
 }
 
+// AppArmor profile names: alphanumeric, underscores, hyphens, dots, max 64 chars
+const APPARMOR_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9._-]{0,63}$/;
+
+function validateAppArmorName(name: string): boolean {
+  return APPARMOR_NAME_PATTERN.test(name);
+}
+
 export function generateAppArmorProfile(appName: string = 'custom-app'): string {
+  if (!validateAppArmorName(appName)) {
+    throw new Error(`Invalid AppArmor profile name: ${appName}`);
+  }
+
   return `#include <tunables/global>
 
 profile ${appName} flags=(attach_disconnected) {

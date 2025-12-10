@@ -2,7 +2,7 @@ import { BuildSpec } from '../ai/schema';
 import { resolvePackages, getPackageManager } from './packageMaps';
 import { validateGitUrl } from '../utils/sanitizer';
 
-const DOCKER_IMAGES: Record<string, string> = {
+export const DOCKER_IMAGES: Record<string, string> = {
   arch: 'archlinux:latest',
   debian: 'debian:latest',
   ubuntu: 'ubuntu:latest',

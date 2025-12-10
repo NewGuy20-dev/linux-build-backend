@@ -5,8 +5,16 @@ import { checkCancellation } from '../utils/cancellation';
 import { flattenPackages } from '../utils/packages';
 import { sanitizePackageName, validateBuildId, escapeShellArg } from '../utils/sanitizer';
 import { resolvePackages } from './packageMaps';
+import { DOCKER_IMAGES } from './dockerfileGenerator';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+
+// Validate base distro against allowlist
+function validateBaseDistro(distro: string): void {
+  if (!(distro in DOCKER_IMAGES)) {
+    throw new Error(`Unsupported base distribution: ${distro}`);
+  }
+}
 
 // Kernel packages per distro
 const KERNELS: Record<string, Record<string, string>> = {
@@ -320,6 +328,7 @@ CMD tar -cvf /out/${spec.base}-rootfs-${buildId}.tar --exclude=/out --exclude=/p
 };
 
 export const generateIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBaseDistro(spec.base);
   log(buildId, `Starting ISO generation for ${spec.base}...`);
   log(buildId, `Kernel: ${spec.kernel?.version || 'linux-lts'}, Filesystem: ${spec.filesystem?.root || 'ext4'}`);
 

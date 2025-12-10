@@ -153,7 +153,7 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
     await fs.writeFile(path.join(workspacePath, 'Dockerfile'), dockerfile);
     log(buildId, 'Generated Dockerfile');
 
-    // Step 3: Docker build
+    // Step 4: Docker build
     await checkCancellation(buildId);
     await updateStep(buildId, BuildStep.BUILDING);
     
@@ -204,7 +204,7 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
       }));
     }
 
-    // Step 4: ISO generation
+    // Step 5: ISO generation
     await checkCancellation(buildId);
     await updateStep(buildId, BuildStep.ISO_GENERATING);
     
@@ -219,7 +219,7 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
       log(buildId, `ISO generation failed (non-fatal): ${err}`);
     }
 
-    // Step 5: Complete
+    // Step 6: Complete
     await updateStep(buildId, BuildStep.COMPLETE);
     const duration = Math.round((Date.now() - startTime) / 1000);
     log(buildId, `Build completed in ${duration}s`);

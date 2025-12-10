@@ -1,14 +1,32 @@
 import { BuildSpec } from '../ai/schema';
 
+// Validate backup destinations: local paths, rsync URLs, s3:// URLs
+const LOCAL_PATH = /^\/[a-zA-Z0-9._\-\/]+$/;
+const RSYNC_URL = /^[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+:[a-zA-Z0-9._\-\/]+$/;
+const S3_URL = /^s3:\/\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._\-\/]*$/;
+
+function validateBackupDestination(dest: string): boolean {
+  return LOCAL_PATH.test(dest) || RSYNC_URL.test(dest) || S3_URL.test(dest);
+}
+
+function sanitizeDestination(dest: string): string {
+  if (dest === 'local') return '/var/backup';
+  if (!validateBackupDestination(dest)) {
+    throw new Error(`Invalid backup destination: ${dest}`);
+  }
+  return dest;
+}
+
 export function generateBorgConfig(spec: BuildSpec): string {
   const backup = spec.backup;
   if (!backup || backup.tool !== 'borg') return '';
 
   const retention = backup.retention || { daily: 7, weekly: 4, monthly: 12 };
   const destinations = backup.destinations || ['local'];
+  const safeDest = sanitizeDestination(destinations[0]);
 
   return `# Borg Backup Configuration
-BORG_REPO="${destinations[0] === 'local' ? '/var/backup/borg' : destinations[0]}"
+BORG_REPO="${safeDest === '/var/backup' ? '/var/backup/borg' : safeDest}"
 BORG_PASSPHRASE=""  # Set via environment variable
 
 # Retention policy
@@ -39,9 +57,10 @@ export function generateResticConfig(spec: BuildSpec): string {
 
   const retention = backup.retention || { daily: 7, weekly: 4, monthly: 12 };
   const destinations = backup.destinations || ['local'];
+  const safeDest = sanitizeDestination(destinations[0]);
 
   return `# Restic Backup Configuration
-RESTIC_REPOSITORY="${destinations[0] === 'local' ? '/var/backup/restic' : destinations[0]}"
+RESTIC_REPOSITORY="${safeDest === '/var/backup' ? '/var/backup/restic' : safeDest}"
 RESTIC_PASSWORD_FILE="/etc/restic/password"
 
 # Retention policy

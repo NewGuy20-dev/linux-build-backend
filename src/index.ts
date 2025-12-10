@@ -11,6 +11,11 @@ import { errorHandler } from './middleware/errorHandler';
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy configuration for production (behind reverse proxy)
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
 // Security headers
 app.use(helmet({
   contentSecurityPolicy: {
@@ -43,16 +48,17 @@ app.use(cors({
   credentials: true,
 }));
 
+// Body parsing with size limits
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
 app.use((req, _res, next) => {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  const sourceIp = Array.isArray(forwardedFor)
-    ? forwardedFor[0]
-    : forwardedFor ?? req.socket.remoteAddress;
+  // req.ip respects trust proxy setting
+  const sourceIp = req.ip || req.socket.remoteAddress;
   console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.originalUrl} from ${sourceIp}`);
   next();
 });
 
-app.use(express.json());
 app.use('/api', buildRoutes);
 
 // Global error handler - must be after routes

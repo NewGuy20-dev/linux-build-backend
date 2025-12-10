@@ -10,12 +10,12 @@ router.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
-// Protected endpoints with rate limiting
-router.post('/build', authMiddleware, buildRateLimit, startBuild);
-router.post('/build/start', authMiddleware, buildRateLimit, startBuild);
-router.post('/build/generate', authMiddleware, generateRateLimit, generateFromPrompt);
-router.get('/build/status/:id', authMiddleware, apiRateLimit, getBuildStatus);
-router.get('/build/artifact/:id', authMiddleware, apiRateLimit, getBuildArtifact);
-router.get('/build/download/:id/:type', authMiddleware, apiRateLimit, downloadArtifact);
+// Protected endpoints - rate limiting BEFORE auth to prevent brute force
+router.post('/build', buildRateLimit, authMiddleware, startBuild);
+router.post('/build/start', buildRateLimit, authMiddleware, startBuild);
+router.post('/build/generate', generateRateLimit, authMiddleware, generateFromPrompt);
+router.get('/build/status/:id', apiRateLimit, authMiddleware, getBuildStatus);
+router.get('/build/artifact/:id', apiRateLimit, authMiddleware, getBuildArtifact);
+router.get('/build/download/:id/:type', apiRateLimit, authMiddleware, downloadArtifact);
 
 export default router;

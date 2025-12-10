@@ -5,7 +5,7 @@ import { generateId } from '../utils/id';
 import prisma from '../db/db';
 import { normalizePackages } from '../utils/packages';
 import { generateBuildSpec } from '../ai/ollama';
-import { validatePathWithinDir } from '../utils/sanitizer';
+import { validatePathWithinDir, maskSensitiveData } from '../utils/sanitizer';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -17,7 +17,7 @@ const getOwnerKey = (req: Request): string => {
   if (req.apiKey) {
     return crypto.createHash('sha256').update(req.apiKey).digest('hex').slice(0, 32);
   }
-  // Fallback to IP (less secure but better than nothing)
+  // req.ip respects trust proxy setting
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   return crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
 };
@@ -61,7 +61,14 @@ export const startBuild = async (req: Request, res: Response) => {
       },
     });
 
-    runBuildLifecycle(normalizedSpec, buildId);
+    // Fire-and-forget with error handling
+    runBuildLifecycle(normalizedSpec, buildId).catch(async (error) => {
+      console.error(`Build lifecycle failed for ${buildId}:`, maskSensitiveData(error.message));
+      await prisma.userBuild.update({
+        where: { id: buildId },
+        data: { status: 'FAILED' },
+      }).catch(console.error);
+    });
 
     res.status(202).json({ buildId, spec: normalizedSpec });
   } catch (error) {

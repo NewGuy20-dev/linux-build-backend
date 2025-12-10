@@ -3,6 +3,7 @@ import { systemPrompt } from './systemPrompt';
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://127.0.0.1:11434';
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'linux-builder';
+const OLLAMA_TIMEOUT = parseInt(process.env.OLLAMA_TIMEOUT || '30000', 10);
 const MAX_RETRIES = 3;
 const MAX_PROMPT_LENGTH = 2000;
 
@@ -23,30 +24,53 @@ function sanitizePrompt(prompt: string): string {
 }
 
 async function callOllama(prompt: string): Promise<string> {
-  const response = await fetch(`${OLLAMA_URL}/api/generate`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), OLLAMA_TIMEOUT);
 
-  if (!response.ok) {
-    throw new Error(`Ollama request failed: ${response.statusText}`);
+  try {
+    const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt,
+        stream: false,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(`Ollama request failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.response;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  const data = await response.json();
-  return data.response;
 }
 
 function extractJson(text: string): object {
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) {
-    throw new Error(`No valid JSON found in response`);
+  if (text.length > 100000) {
+    throw new Error('Response too large');
   }
-  return JSON.parse(jsonMatch[0]);
+  
+  // Find balanced braces instead of greedy regex
+  const start = text.indexOf('{');
+  if (start === -1) {
+    throw new Error('No valid JSON found in response');
+  }
+  
+  let depth = 0;
+  for (let i = start; i < text.length && i < start + 50000; i++) {
+    if (text[i] === '{') depth++;
+    else if (text[i] === '}') depth--;
+    if (depth === 0) {
+      return JSON.parse(text.slice(start, i + 1));
+    }
+  }
+  
+  throw new Error('No valid JSON found in response');
 }
 
 export async function generateBuildSpec(userPrompt: string): Promise<BuildSpec> {
