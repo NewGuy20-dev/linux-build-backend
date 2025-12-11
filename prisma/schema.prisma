@@ -95,9 +95,180 @@ model Tenant {
   createdAt   DateTime  @default(now())
   tier        String    @default("free")  // free, standard, premium
   settings    Json?
+  
+  // Phase 12: Resource quotas and usage
+  maxBuildsPerMonth   Int       @default(100)
+  maxConcurrentBuilds Int       @default(2)
+  storageQuotaMb      Int       @default(5000)
+  currentUsage        Json?     // { builds: 0, storageMb: 0 }
+  
   builds      UserBuild[]
   apiKeys     ApiKey[]
   webhooks    Webhook[]
+  teams       Team[]
+  templates   BuildTemplate[]
+  members     TenantMember[]
+}
+
+// Phase 12: RBAC - Tenant Members with Roles
+model TenantMember {
+  id        String   @id @default(cuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  userId    String   // External user ID
+  role      String   @default("member") // owner, admin, member, viewer
+  createdAt DateTime @default(now())
+  
+  @@unique([tenantId, userId])
+  @@index([tenantId])
+  @@index([userId])
+}
+
+// Phase 13: Build Templates
+model BuildTemplate {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  spec        Json
+  version     String   @default("1.0.0")
+  authorId    String
+  tenantId    String?
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  parentId    String?  // For forked templates
+  downloads   Int      @default(0)
+  rating      Float?
+  tags        String[] @default([])
+  isPublic    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  reviews     TemplateReview[]
+  
+  @@index([authorId])
+  @@index([isPublic, rating])
+  @@index([tenantId])
+}
+
+model TemplateReview {
+  id         String   @id @default(cuid())
+  templateId String
+  template   BuildTemplate @relation(fields: [templateId], references: [id])
+  userId     String
+  rating     Int      // 1-5
+  comment    String?
+  createdAt  DateTime @default(now())
+  
+  @@unique([templateId, userId])
+  @@index([templateId])
+}
+
+// Phase 14: Teams and Collaboration
+model Team {
+  id        String       @id @default(cuid())
+  name      String
+  slug      String       @unique
+  tenantId  String
+  tenant    Tenant       @relation(fields: [tenantId], references: [id])
+  createdAt DateTime     @default(now())
+  members   TeamMember[]
+  approvals BuildApproval[]
+  
+  @@index([tenantId])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id])
+  userId    String
+  role      String   @default("viewer") // admin, builder, viewer
+  createdAt DateTime @default(now())
+  
+  @@unique([teamId, userId])
+  @@index([teamId])
+}
+
+model BuildApproval {
+  id         String   @id @default(cuid())
+  buildId    String
+  teamId     String
+  team       Team     @relation(fields: [teamId], references: [id])
+  status     String   @default("pending") // pending, approved, rejected
+  reviewerId String?
+  comment    String?
+  createdAt  DateTime @default(now())
+  
+  @@index([buildId])
+  @@index([teamId])
+}
+
+// Phase 16: Analytics
+model BuildMetrics {
+  id            String   @id @default(cuid())
+  buildId       String   @unique
+  distro        String
+  duration      Int      // seconds
+  cpuSeconds    Float?
+  memoryPeakMb  Int?
+  diskUsageMb   Int?
+  packageCount  Int?
+  cacheHitRate  Float?
+  status        String
+  createdAt     DateTime @default(now())
+  
+  @@index([distro])
+  @@index([createdAt])
+  @@index([status])
+}
+
+// Phase 17: Security Scanning
+model SecurityScan {
+  id           String   @id @default(cuid())
+  buildId      String
+  scanType     String   // sbom, vulnerability, compliance
+  status       String   @default("pending") // pending, completed, failed
+  results      Json?
+  vulnerabilities Int   @default(0)
+  critical     Int      @default(0)
+  high         Int      @default(0)
+  medium       Int      @default(0)
+  low          Int      @default(0)
+  createdAt    DateTime @default(now())
+  
+  @@index([buildId])
+  @@index([scanType])
+}
+
+// Phase 20: Plugin System
+model Plugin {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  version     String
+  description String?
+  author      String
+  entryPoint  String   // Path to plugin entry
+  hooks       String[] @default([]) // preBuild, postBuild, etc.
+  enabled     Boolean  @default(true)
+  config      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@index([enabled])
+}
+
+// Phase 22: Maintenance Jobs
+model MaintenanceJob {
+  id          String    @id @default(cuid())
+  type        String    // cleanup, backup, healthcheck
+  status      String    @default("pending") // pending, running, completed, failed
+  startedAt   DateTime?
+  completedAt DateTime?
+  result      Json?
+  error       String?
+  createdAt   DateTime  @default(now())
+  
+  @@index([type])
+  @@index([status])
+  @@index([createdAt])
 }
 
 model Webhook {
