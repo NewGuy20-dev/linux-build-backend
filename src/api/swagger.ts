@@ -6,17 +6,57 @@ const options: swaggerJsdoc.Options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Linux Builder API',
+      title: 'Linux Builder Engine API',
       version: '1.0.0',
-      description: 'API for building custom Linux images',
+      description: 'API for generating custom Linux OS builds with Docker and ISO output formats',
+      contact: { name: 'API Support' },
+      license: { name: 'ISC' },
     },
-    servers: [{ url: '/api' }],
+    servers: [
+      { url: '/api', description: 'API server' },
+    ],
     components: {
       securitySchemes: {
-        ApiKeyAuth: { type: 'apiKey', in: 'header', name: 'x-api-key' },
+        bearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description: 'API key as Bearer token',
+        },
+        apiKeyHeader: {
+          type: 'apiKey',
+          in: 'header',
+          name: 'X-API-Key',
+          description: 'API key in header',
+        },
+      },
+      schemas: {
+        BuildSpec: {
+          type: 'object',
+          required: ['base'],
+          properties: {
+            base: { type: 'string', enum: ['arch', 'debian', 'ubuntu', 'alpine', 'fedora', 'opensuse', 'void', 'gentoo'] },
+            packages: { type: 'object', description: 'Packages to install' },
+            kernel: { type: 'object', properties: { version: { type: 'string' } } },
+            init: { type: 'string', enum: ['systemd', 'openrc', 'runit', 's6'] },
+          },
+        },
+        BuildResponse: {
+          type: 'object',
+          properties: {
+            buildId: { type: 'string' },
+            spec: { $ref: '#/components/schemas/BuildSpec' },
+          },
+        },
+        Error: {
+          type: 'object',
+          properties: {
+            error: { type: 'string' },
+            details: { type: 'string' },
+          },
+        },
       },
     },
-    security: [{ ApiKeyAuth: [] }],
+    security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
   },
   apis: ['./src/api/*.routes.ts'],
 };

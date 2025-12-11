@@ -22,21 +22,30 @@ export const httpRequestDuration = new Histogram({
 export const buildsTotal = new Counter({
   name: 'builds_total',
   help: 'Total builds',
-  labelNames: ['status', 'tier'],
+  labelNames: ['status', 'distro'],
   registers: [registry],
 });
 
 export const buildsInProgress = new Gauge({
   name: 'builds_in_progress',
   help: 'Builds currently in progress',
+  labelNames: ['distro'],
   registers: [registry],
 });
 
 export const buildDuration = new Histogram({
   name: 'build_duration_seconds',
   help: 'Build duration in seconds',
-  labelNames: ['tier'],
-  buckets: [60, 300, 600, 1200, 1800, 3600],
+  labelNames: ['distro', 'status'],
+  buckets: [60, 120, 300, 600, 1200, 1800, 3600],
+  registers: [registry],
+});
+
+export const buildArtifactSize = new Histogram({
+  name: 'build_artifact_size_bytes',
+  help: 'Build artifact size in bytes',
+  labelNames: ['distro', 'type'],
+  buckets: [1e6, 1e7, 1e8, 5e8, 1e9, 2e9, 5e9],
   registers: [registry],
 });
 

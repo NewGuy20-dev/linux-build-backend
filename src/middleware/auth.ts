@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
-import { PrismaClient } from '@prisma/client';
 import { validateApiKey, hashApiKey } from '../utils/apiKey';
+import prisma from '../db/db';
 
 declare global {
   namespace Express {
@@ -12,8 +12,6 @@ declare global {
     }
   }
 }
-
-const prisma = new PrismaClient();
 
 // Fallback: env-based keys (comma-separated)
 const getEnvApiKeys = (): Set<string> => {

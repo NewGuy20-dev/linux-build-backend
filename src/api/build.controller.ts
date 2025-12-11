@@ -13,26 +13,40 @@ import * as path from 'path';
 
 const ARTIFACTS_DIR = path.resolve('artifacts');
 
-// Generate owner key from API key or IP
-const getOwnerKey = (req: Request): string => {
+// Generate owner key from API key (preferred) or IP (deprecated fallback)
+const getOwnerKey = (req: Request): string | null => {
   if (req.apiKey) {
     return crypto.createHash('sha256').update(req.apiKey).digest('hex').slice(0, 32);
   }
-  // req.ip respects trust proxy setting
+  // Deprecated: IP-based ownership - log warning
+  logger.warn({ ip: req.ip }, 'IP-based ownership is deprecated - use API key authentication');
   const ip = req.ip || req.socket.remoteAddress || 'unknown';
   return crypto.createHash('sha256').update(ip).digest('hex').slice(0, 32);
 };
 
-// Check if requester owns the build
+// Check if requester owns the build (with tenant scoping and audit logging)
 const checkBuildOwnership = async (buildId: string, req: Request): Promise<boolean> => {
   const build = await prisma.userBuild.findUnique({
     where: { id: buildId },
-    select: { ownerKey: true },
+    select: { ownerKey: true, tenantId: true },
   });
   if (!build) return false;
+  
+  // Tenant scoping: if build has tenant, requester must be in same tenant
+  if (build.tenantId && req.tenantId && build.tenantId !== req.tenantId) {
+    logger.warn({ buildId, requestTenant: req.tenantId, buildTenant: build.tenantId }, 'Tenant mismatch - access denied');
+    return false;
+  }
+  
   // Allow access if no owner set (legacy builds) or owner matches
   if (!build.ownerKey) return true;
-  return build.ownerKey === getOwnerKey(req);
+  const ownerKey = getOwnerKey(req);
+  const hasAccess = ownerKey === build.ownerKey;
+  
+  if (!hasAccess) {
+    logger.warn({ buildId, ip: req.ip }, 'Build ownership check failed - access denied');
+  }
+  return hasAccess;
 };
 
 export const startBuild = async (req: Request, res: Response) => {
@@ -59,6 +73,7 @@ export const startBuild = async (req: Request, res: Response) => {
         baseDistro: buildSpec.base,
         spec: normalizedSpec as any,
         ownerKey,
+        tenantId: req.tenantId,
       },
     });
 
@@ -201,7 +216,9 @@ export const downloadArtifact = async (req: Request, res: Response) => {
     }
 
     const fileName = path.basename(filePath);
-    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    // Sanitize filename for Content-Disposition header to prevent header injection
+    const safeFilename = fileName.replace(/[^\w.-]/g, '_').slice(0, 255);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
     res.setHeader('Content-Type', 'application/octet-stream');
     
     const fileStream = fs.createReadStream(filePath);

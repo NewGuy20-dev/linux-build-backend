@@ -2,12 +2,15 @@
 
 # Linux Builder Engine - Build Lifecycle Test Script
 # This script tests the complete build lifecycle: start -> status -> download
+# Usage: API_KEY=your-key bash test-build-lifecycle.sh
 
 set -e
 
 # Configuration
 BASE_URL="http://localhost:3000"
 BUILD_ID=""
+API_KEY="${API_KEY:-test-key}"
+AUTH_HEADER="Authorization: Bearer $API_KEY"
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -22,6 +25,7 @@ echo -e "${BLUE}=== Linux Builder Engine - Build Lifecycle Test ===${NC}\n"
 echo -e "${YELLOW}[1/4] Starting a new build...${NC}"
 START_RESPONSE=$(curl -s -X POST "$BASE_URL/api/build/start" \
   -H "Content-Type: application/json" \
+  -H "$AUTH_HEADER" \
   -d '{
     "base": "arch",
     "architecture": "x86_64",
@@ -75,7 +79,7 @@ echo -e "${GREEN}✓ Build started with ID: $BUILD_ID${NC}\n"
 
 # Step 2: Check build status (initial)
 echo -e "${YELLOW}[2/4] Checking initial build status...${NC}"
-STATUS_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID")
+STATUS_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID" -H "$AUTH_HEADER")
 
 echo -e "${GREEN}Response:${NC}"
 echo "$STATUS_RESPONSE" | jq '.' 2>/dev/null || echo "$STATUS_RESPONSE"
@@ -90,7 +94,7 @@ ELAPSED=0
 POLL_INTERVAL=5
 
 while [ $ELAPSED -lt $TIMEOUT ]; do
-  STATUS_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID")
+  STATUS_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID" -H "$AUTH_HEADER")
   STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.status' 2>/dev/null)
   
   echo -e "  Status: ${BLUE}$STATUS${NC} (elapsed: ${ELAPSED}s)"
@@ -111,7 +115,7 @@ fi
 
 # Step 4: Get final status and artifacts
 echo -e "${YELLOW}[4/4] Retrieving final build status and artifacts...${NC}"
-FINAL_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID")
+FINAL_RESPONSE=$(curl -s -X GET "$BASE_URL/api/build/status/$BUILD_ID" -H "$AUTH_HEADER")
 
 echo -e "${GREEN}Final Response:${NC}"
 echo "$FINAL_RESPONSE" | jq '.' 2>/dev/null || echo "$FINAL_RESPONSE"

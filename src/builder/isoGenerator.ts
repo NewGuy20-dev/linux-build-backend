@@ -1,9 +1,9 @@
 import { BuildSpec } from '../ai/schema';
-import { executeCommand } from '../executor/executor';
+import { executeCommandSecureArgs } from '../executor/executor';
 import { log } from '../executor/logger';
 import { checkCancellation } from '../utils/cancellation';
 import { flattenPackages } from '../utils/packages';
-import { sanitizePackageName, validateBuildId, escapeShellArg } from '../utils/sanitizer';
+import { sanitizePackageName, validateBuildId } from '../utils/sanitizer';
 import { resolvePackages } from './packageMaps';
 import { DOCKER_IMAGES } from './dockerfileGenerator';
 import * as fs from 'fs/promises';
@@ -162,10 +162,10 @@ CMD ["mkarchiso", "-v", "-w", "/work", "-o", "/out", "/releng"]
 
   const imageName = `iso-arch-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -198,10 +198,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 
   const imageName = `iso-debian-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -234,10 +234,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 
   const imageName = `iso-ubuntu-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -265,10 +265,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || tar -cvf /out/fedora-rootfs.tar /
 
   const imageName = `iso-fedora-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.iso') || f.endsWith('.tar'));
@@ -298,10 +298,10 @@ CMD tar -cvf /out/alpine-${buildId}.tar -C /iso .
 
   const imageName = `iso-alpine-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.tar') || f.endsWith('.iso'));
@@ -327,10 +327,10 @@ CMD tar -cvf /out/${spec.base}-rootfs-${buildId}.tar --exclude=/out --exclude=/p
 
   const imageName = `iso-${spec.base}-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${escapeShellArg(imageName)} -f ${escapeShellArg(dockerfilePath)} ${escapeShellArg(workspacePath)}`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm -v ${escapeShellArg(outDir + ':/out')} ${escapeShellArg(imageName)}`, buildId);
-  await executeCommand(`docker rmi ${escapeShellArg(imageName)}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.tar'));

@@ -40,6 +40,8 @@ model UserBuild {
   @@index([createdAt])
   @@index([status, createdAt])
   @@index([tenantId])
+  @@index([ownerKey, status])
+  @@index([tenantId, status, createdAt])
 }
 
 model BuildLog {

@@ -1,6 +1,33 @@
-import { exec, ExecOptions } from "child_process";
+import { exec, execFile, ExecOptions, ExecFileOptions } from "child_process";
 import { log } from "./logger";
-import { maskSensitiveData } from "../utils/sanitizer";
+
+/**
+ * Execute a command using execFile (no shell) - more secure for commands with known arguments.
+ * Use this when you have a command and separate arguments array.
+ */
+export const executeCommandSecureArgs = (
+  command: string,
+  args: string[],
+  buildId: string,
+  options?: ExecFileOptions
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      const out = stdout?.toString() || "";
+      const err = stderr?.toString() || "";
+
+      if (error) {
+        log(buildId, `Error executing: ${command}`);
+        log(buildId, err);
+        reject(err);
+        return;
+      }
+
+      log(buildId, `Successfully executed: ${command}`);
+      resolve(out);
+    });
+  });
+};
 
 export const executeCommand = (
   command: string,
@@ -13,19 +40,19 @@ export const executeCommand = (
       const err = stderr?.toString() || "";
 
       if (error) {
-        log(buildId, `Error executing command: ${maskSensitiveData(command)}`);
-        log(buildId, maskSensitiveData(err));
+        log(buildId, `Error executing command: ${command}`);
+        log(buildId, err);
         reject(err);
         return;
       }
 
-      log(buildId, `Successfully executed command: ${maskSensitiveData(command)}`);
+      log(buildId, `Successfully executed command: ${command}`);
 
       if (err.trim().length > 0) {
-        log(buildId, maskSensitiveData(err));
+        log(buildId, err);
       }
 
-      log(buildId, maskSensitiveData(out));
+      log(buildId, out);
       resolve(out);
     });
   });
@@ -44,7 +71,7 @@ export const executeCommandSecure = (
 
       if (error) {
         log(buildId, `Error executing secure command`);
-        log(buildId, maskSensitiveData(err));
+        log(buildId, err);
         reject(err);
         return;
       }

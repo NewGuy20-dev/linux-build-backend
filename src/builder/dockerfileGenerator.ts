@@ -150,9 +150,7 @@ function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
     const { packages } = resolvePackages(['macchanger'], distro);
     if (packages.length) {
       lines.push(`RUN ${pm.install} ${packages[0]} || true`);
-      lines.push('RUN echo "[connection]" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
-      lines.push('RUN echo "wifi.cloned-mac-address=random" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
-      lines.push('RUN echo "ethernet.cloned-mac-address=random" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
+      lines.push('RUN printf "[connection]\\nwifi.cloned-mac-address=random\\nethernet.cloned-mac-address=random\\n" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
     }
   }
 

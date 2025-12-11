@@ -84,6 +84,23 @@ describe('escapeShellArg', () => {
   it('handles empty string', () => {
     expect(escapeShellArg('')).toBe("''");
   });
+
+  it('escapes command injection attempts', () => {
+    expect(escapeShellArg('test; rm -rf /')).toBe("'test; rm -rf /'");
+    expect(escapeShellArg('$(whoami)')).toBe("'$(whoami)'");
+    expect(escapeShellArg('`id`')).toBe("'`id`'");
+  });
+
+  it('handles nested quotes', () => {
+    expect(escapeShellArg("test'quote")).toBe("'test'\\''quote'");
+  });
+
+  it('handles special shell characters', () => {
+    expect(escapeShellArg('$HOME')).toBe("'$HOME'");
+    expect(escapeShellArg('a && b')).toBe("'a && b'");
+    expect(escapeShellArg('a || b')).toBe("'a || b'");
+    expect(escapeShellArg('a | b')).toBe("'a | b'");
+  });
 });
 
 describe('sanitizeCommand', () => {

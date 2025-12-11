@@ -30,7 +30,7 @@ describe('metrics', () => {
 
   describe('buildsTotal', () => {
     it('increments with labels', () => {
-      buildsTotal.inc({ status: 'completed', tier: 'free' });
+      buildsTotal.inc({ status: 'completed', distro: 'arch' });
       expect(buildsTotal).toBeDefined();
     });
   });

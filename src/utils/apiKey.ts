@@ -15,7 +15,7 @@ export const hashApiKey = (key: string): string =>
   createHash('sha256').update(key).digest('hex');
 
 export const createApiKey = async (
-  prisma: PrismaClient,
+  prisma: any,
   name: string,
   options?: { scopes?: string[]; rateLimit?: number; expiresAt?: Date }
 ) => {
@@ -36,7 +36,7 @@ export const createApiKey = async (
 };
 
 export const validateApiKey = async (
-  prisma: PrismaClient,
+  prisma: any,
   key: string
 ): Promise<{ valid: boolean; scopes?: string[]; rateLimit?: number; id?: string }> => {
   if (!key.startsWith(PREFIX)) return { valid: false };
@@ -57,5 +57,5 @@ export const validateApiKey = async (
   return { valid: true, scopes: record.scopes, rateLimit: record.rateLimit, id: record.id };
 };
 
-export const revokeApiKey = async (prisma: PrismaClient, id: string) =>
+export const revokeApiKey = async (prisma: any, id: string) =>
   prisma.apiKey.update({ where: { id }, data: { revokedAt: new Date() } });

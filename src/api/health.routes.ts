@@ -3,46 +3,91 @@ import { PrismaClient } from '@prisma/client';
 import { redis } from '../utils/redis';
 import { getMetrics, getContentType } from '../utils/metrics';
 import { apiRateLimit } from '../middleware/rateLimit';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 
+const execAsync = promisify(exec);
 const router = Router();
 const prisma = new PrismaClient();
+
+interface HealthCheck {
+  status: 'ok' | 'error';
+  latency?: number;
+  message?: string;
+}
 
 interface HealthStatus {
   status: 'healthy' | 'degraded' | 'unhealthy';
   timestamp: string;
-  checks: Record<string, { status: string; latency?: number }>;
+  checks: Record<string, HealthCheck>;
 }
 
-// Rate limited health check
-router.get('/health', apiRateLimit, async (_req: Request, res: Response) => {
-  const health: HealthStatus = {
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    checks: {},
-  };
-
-  // Database check
+const checkDatabase = async (): Promise<HealthCheck> => {
   try {
     const start = Date.now();
     await prisma.$queryRaw`SELECT 1`;
-    health.checks.database = { status: 'ok', latency: Date.now() - start };
-  } catch {
-    health.checks.database = { status: 'error' };
-    health.status = 'unhealthy';
+    return { status: 'ok', latency: Date.now() - start };
+  } catch (e) {
+    return { status: 'error', message: 'Database connection failed' };
   }
+};
 
-  // Redis check
+const checkRedis = async (): Promise<HealthCheck> => {
   try {
     const start = Date.now();
     await redis.ping();
-    health.checks.redis = { status: 'ok', latency: Date.now() - start };
+    return { status: 'ok', latency: Date.now() - start };
   } catch {
-    health.checks.redis = { status: 'error' };
-    health.status = health.status === 'healthy' ? 'degraded' : health.status;
+    return { status: 'error', message: 'Redis connection failed' };
+  }
+};
+
+const checkDocker = async (): Promise<HealthCheck> => {
+  try {
+    const start = Date.now();
+    await execAsync('docker info --format "{{.ServerVersion}}"', { timeout: 5000 });
+    return { status: 'ok', latency: Date.now() - start };
+  } catch {
+    return { status: 'error', message: 'Docker daemon not available' };
+  }
+};
+
+// Rate limited health check
+router.get('/health', apiRateLimit, async (_req: Request, res: Response) => {
+  const [database, redisCheck] = await Promise.all([checkDatabase(), checkRedis()]);
+
+  const health: HealthStatus = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    checks: { database, redis: redisCheck },
+  };
+
+  if (database.status === 'error') health.status = 'unhealthy';
+  if (redisCheck.status === 'error' && health.status === 'healthy') health.status = 'degraded';
+
+  res.status(health.status === 'unhealthy' ? 503 : 200).json(health);
+});
+
+// Detailed health check with all dependencies
+router.get('/health/detailed', apiRateLimit, async (_req: Request, res: Response) => {
+  const [database, redisCheck, docker] = await Promise.all([
+    checkDatabase(),
+    checkRedis(),
+    checkDocker(),
+  ]);
+
+  const health: HealthStatus = {
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    checks: { database, redis: redisCheck, docker },
+  };
+
+  const errors = Object.values(health.checks).filter(c => c.status === 'error');
+  if (errors.length > 0) {
+    health.status = errors.some(e => e.message?.includes('Database')) ? 'unhealthy' : 'degraded';
   }
 
-  const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
-  res.status(statusCode).json(health);
+  res.status(health.status === 'unhealthy' ? 503 : 200).json(health);
 });
 
 // Lightweight liveness probe - no rate limit needed
