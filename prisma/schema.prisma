@@ -296,3 +296,32 @@ model ConversationContext {
 
   @@index([sessionId])
 }
+
+// Phase 21: Custom RBAC Roles
+model CustomRole {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+// Phase 21: Usage/Billing Records
+model UsageRecord {
+  id        String   @id @default(cuid())
+  tenantId  String
+  type      String   // build, storage, api_call, compliance_check
+  quantity  Int
+  unitCost  Float    // in cents
+  metadata  Json?
+  timestamp DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, timestamp])
+  @@index([type])
+}
