@@ -1,7 +1,8 @@
 import { BuildSpec } from '../ai/schema';
 import { resolvePackages, getPackageManager } from './packageMaps';
+import { validateGitUrl } from '../utils/sanitizer';
 
-const DOCKER_IMAGES: Record<string, string> = {
+export const DOCKER_IMAGES: Record<string, string> = {
   arch: 'archlinux:latest',
   debian: 'debian:latest',
   ubuntu: 'ubuntu:latest',
@@ -73,6 +74,12 @@ function generateSecuritySetup(spec: BuildSpec, distro: string): string[] {
   return lines;
 }
 
+/**
+ * Produce Dockerfile RUN/comment lines that enable or register post-install services for the spec's init system.
+ *
+ * @param spec - Build specification whose `init` selects the init system (defaults to `systemd`) and whose `postInstall?.services` lists service names to enable
+ * @returns An array of Dockerfile instruction strings that enable or register each requested service for the chosen init system (comments are emitted for init systems that require manual handling)
+ */
 function generateServiceSetup(spec: BuildSpec): string[] {
   const lines: string[] = [];
   const init = spec.init || 'systemd';
@@ -98,6 +105,64 @@ function generateServiceSetup(spec: BuildSpec): string[] {
   return lines;
 }
 
+/**
+ * Create Dockerfile snippet lines for optional extras (boot splash, dotfiles, DNS-over-HTTPS, MAC randomization).
+ *
+ * @param spec - Build specification controlling which extras are enabled and their configuration
+ * @param distro - Target distribution identifier used to resolve package names and package manager commands
+ * @returns An array of Dockerfile lines (strings) to apply the enabled extras; may include comment warnings if validation fails
+ */
+function generateExtrasSetup(spec: BuildSpec, distro: string): string[] {
+  const lines: string[] = [];
+  const pm = getPackageManager(distro);
+
+  // Plymouth boot splash
+  if (spec.customization?.bootloader?.plymouth) {
+    const { packages } = resolvePackages(['plymouth'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN plymouth-set-default-theme spinner 2>/dev/null || true');
+    }
+  }
+
+  // Dotfiles - validate URL before cloning
+  if (spec.customization?.dotfiles?.enabled && spec.customization.dotfiles.repo) {
+    try {
+      const validatedUrl = validateGitUrl(spec.customization.dotfiles.repo);
+      lines.push(`RUN git clone --depth 1 '${validatedUrl}' /root/.dotfiles 2>/dev/null || true`);
+      lines.push('RUN cd /root/.dotfiles && [ -f install.sh ] && bash install.sh || true');
+    } catch (e) {
+      lines.push(`# WARNING: Dotfiles URL validation failed - skipped`);
+    }
+  }
+
+  // DNS over HTTPS
+  if (spec.defaults?.dnsOverHttps) {
+    const { packages } = resolvePackages(['stubby'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN echo "nameserver 127.0.0.1" > /etc/resolv.conf.head 2>/dev/null || true');
+    }
+  }
+
+  // MAC randomization
+  if (spec.defaults?.macRandomization) {
+    const { packages } = resolvePackages(['macchanger'], distro);
+    if (packages.length) {
+      lines.push(`RUN ${pm.install} ${packages[0]} || true`);
+      lines.push('RUN printf "[connection]\\nwifi.cloned-mac-address=random\\nethernet.cloned-mac-address=random\\n" >> /etc/NetworkManager/conf.d/mac.conf 2>/dev/null || true');
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Compose a Dockerfile tailored to the provided BuildSpec and its base distribution.
+ *
+ * @param spec - BuildSpec describing the base distribution, packages, customization, security and post-install options; generated Dockerfile includes distro-specific initialization, package installation, shell/security/service/extras setup, and warning comments when applicable.
+ * @returns The assembled Dockerfile content as a single string with newline-separated lines.
+ */
 function generateDistroDockerfile(spec: BuildSpec): string {
   const distro = spec.base;
   const image = DOCKER_IMAGES[distro];
@@ -156,6 +221,9 @@ function generateDistroDockerfile(spec: BuildSpec): string {
 
   // Service setup
   lines.push(...generateServiceSetup(spec));
+
+  // Extras: Plymouth, dotfiles, DNS over HTTPS, MAC randomization
+  lines.push(...generateExtrasSetup(spec, distro));
 
   // Set default shell if not bash
   if (spec.customization?.shell && spec.customization.shell !== 'bash') {

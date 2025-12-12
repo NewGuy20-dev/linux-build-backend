@@ -3,9 +3,10 @@ import { generateDockerfile } from '../builder/dockerfileGenerator';
 import { generateIso } from '../builder/isoGenerator';
 import { exportDockerImage } from '../builder/tarExporter';
 import { createTempDir, cleanupDir } from '../utils/fs';
-import { executeCommand } from './executor';
+import { executeCommand, executeCommandSecure } from './executor';
 import { log } from './logger';
 import { checkCancellation } from '../utils/cancellation';
+import { validateBuildId, validatePathWithinDir, escapeShellArg } from '../utils/sanitizer';
 import { generateFirewallRules, generateFail2banConfig, generateKernelHardening } from '../utils/securityConfig';
 import { generateServiceScript } from '../utils/serviceConfig';
 import { generateShellRc, generateStarshipConfig } from '../utils/shellConfig';
@@ -18,7 +19,9 @@ const ARTIFACTS_DIR = path.resolve('artifacts');
 
 export enum BuildStep {
   PENDING = 'pending',
+  PARSING = 'parsing',
   VALIDATING = 'validating',
+  RESOLVING = 'resolving',
   GENERATING = 'generating',
   BUILDING = 'building',
   ISO_GENERATING = 'iso_generating',
@@ -102,8 +105,12 @@ const generateConfigFiles = async (spec: BuildSpec, workspacePath: string, build
 };
 
 export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
+  // Validate buildId format to prevent command injection
+  validateBuildId(buildId);
+  
   let workspacePath: string | null = null;
   const startTime = Date.now();
+  const buildWarnings: string[] = [];
 
   try {
     // Step 1: Validation
@@ -114,10 +121,25 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
     if (!validation.valid) {
       throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
     }
-    validation.warnings.forEach(w => log(buildId, `WARNING: ${w}`));
+    validation.warnings.forEach(w => {
+      log(buildId, `WARNING: ${w}`);
+      buildWarnings.push(w);
+    });
     log(buildId, `Validated spec for ${spec.base} (${spec.architecture || 'x86_64'})`);
 
-    // Step 2: Generate configs
+    // Step 2: Resolving (package resolution)
+    await checkCancellation(buildId);
+    await updateStep(buildId, BuildStep.RESOLVING);
+    log(buildId, 'Resolving packages and dependencies...');
+
+    // Determine security level
+    const securityLevel = spec.securityFeatures?.mac?.length || spec.securityFeatures?.kernelHardening?.length
+      ? 'hardened'
+      : spec.securityFeatures?.firewall || spec.securityFeatures?.ssh?.fail2ban
+        ? 'standard'
+        : 'minimal';
+
+    // Step 3: Generate configs
     await checkCancellation(buildId);
     await updateStep(buildId, BuildStep.GENERATING);
     
@@ -131,12 +153,12 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
     await fs.writeFile(path.join(workspacePath, 'Dockerfile'), dockerfile);
     log(buildId, 'Generated Dockerfile');
 
-    // Step 3: Docker build
+    // Step 4: Docker build
     await checkCancellation(buildId);
     await updateStep(buildId, BuildStep.BUILDING);
     
     const imageName = `build-${buildId}`;
-    await executeCommand(`docker build -t ${imageName} "${workspacePath}"`, buildId);
+    await executeCommand(`docker build -t ${escapeShellArg(imageName)} ${escapeShellArg(workspacePath)}`, buildId);
     log(buildId, 'Docker image built');
 
     // Push or export Docker image
@@ -145,12 +167,25 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
       const dockerUser = process.env.DOCKER_HUB_USER;
       const dockerToken = process.env.DOCKER_HUB_TOKEN;
       if (dockerUser && dockerToken) {
-        await executeCommand(`echo "${dockerToken}" | docker login -u ${dockerUser} --password-stdin`, buildId);
+        // Use secure command execution to avoid logging token, bypass proxy for Docker Hub
+        const loginEnv = {
+          ...process.env,
+          NO_PROXY: 'registry-1.docker.io,auth.docker.io,docker.io',
+          HTTP_PROXY: '',
+          HTTPS_PROXY: ''
+        };
+        await executeCommandSecure(`echo ${escapeShellArg(dockerToken)} | docker login -u ${escapeShellArg(dockerUser)} --password-stdin`, buildId, { env: loginEnv });
       }
       const remoteTag = `${dockerRepo}:${buildId}`;
-      await executeCommand(`docker tag ${imageName} ${remoteTag}`, buildId);
+      await executeCommand(`docker tag ${escapeShellArg(imageName)} ${escapeShellArg(remoteTag)}`, buildId);
       try {
-        await executeCommand(`docker push ${remoteTag}`, buildId);
+        const pushEnv = {
+          ...process.env,
+          NO_PROXY: 'registry-1.docker.io,auth.docker.io,docker.io',
+          HTTP_PROXY: '',
+          HTTPS_PROXY: ''
+        };
+        await executeCommand(`docker push ${escapeShellArg(remoteTag)}`, buildId, { env: pushEnv });
         await safeDbCall(buildId, () => prisma.buildArtifact.create({
           data: { buildId, fileName: 'docker-manifest', fileType: 'docker-image-ref', url: remoteTag },
         }));
@@ -169,7 +204,7 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
       }));
     }
 
-    // Step 4: ISO generation
+    // Step 5: ISO generation
     await checkCancellation(buildId);
     await updateStep(buildId, BuildStep.ISO_GENERATING);
     
@@ -184,10 +219,26 @@ export const runBuildLifecycle = async (spec: BuildSpec, buildId: string) => {
       log(buildId, `ISO generation failed (non-fatal): ${err}`);
     }
 
-    // Step 5: Complete
+    // Step 6: Complete
     await updateStep(buildId, BuildStep.COMPLETE);
     const duration = Math.round((Date.now() - startTime) / 1000);
     log(buildId, `Build completed in ${duration}s`);
+
+    // Persist all build metadata
+    await safeDbCall(buildId, () => prisma.userBuild.update({
+      where: { id: buildId },
+      data: {
+        status: 'SUCCESS',
+        kernelVersion: spec.kernel?.version || 'linux-lts',
+        initSystem: spec.init || 'systemd',
+        architecture: spec.architecture || 'x86_64',
+        securityLevel,
+        featuresJson: spec as any,
+        buildDuration: duration,
+        warnings: buildWarnings,
+      },
+    }));
+
     await sendBuildCompleteNotification(buildId, 'SUCCESS');
 
   } catch (error: any) {

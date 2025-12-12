@@ -2,32 +2,82 @@ import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
+import helmet from 'helmet';
 import { initWebSocketServer } from './ws/websocket';
 import buildRoutes from './api/build.routes';
 import { startArtifactCleanupJob } from './utils/artifactCleanup';
+import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
 const server = http.createServer(app);
 
-// CORS - allow all origins (temporary)
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+// Trust proxy configuration for production (behind reverse proxy)
+if (process.env.NODE_ENV === 'production' || process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
+
+// Security headers
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:'],
+      connectSrc: ["'self'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false, // Allow embedding if needed
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+  },
 }));
 
-app.options('*', cors());
+// Additional security headers
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
+
+// CORS configuration - restrict to allowed origins
+const getAllowedOrigins = (): string[] | boolean => {
+  const origins = process.env.ALLOWED_ORIGINS;
+  if (!origins) {
+    if (process.env.NODE_ENV === 'development') {
+      return ['http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:3000'];
+    }
+    return false;
+  }
+  return origins.split(',').map(o => o.trim());
+};
+
+app.use(cors({
+  origin: getAllowedOrigins(),
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true,
+}));
+
+// Body parsing with size limits - stricter for build endpoints
+app.use('/api/build', express.json({ limit: '100kb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 
 app.use((req, _res, next) => {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  const sourceIp = Array.isArray(forwardedFor)
-    ? forwardedFor[0]
-    : forwardedFor ?? req.socket.remoteAddress;
+  // req.ip respects trust proxy setting
+  const sourceIp = req.ip || req.socket.remoteAddress;
   console.log(`[HTTP] ${new Date().toISOString()} ${req.method} ${req.originalUrl} from ${sourceIp}`);
   next();
 });
 
-app.use(express.json());
 app.use('/api', buildRoutes);
+
+// Global error handler - must be after routes
+app.use(errorHandler);
 
 initWebSocketServer(server);
 

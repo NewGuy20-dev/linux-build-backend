@@ -7,3 +7,4 @@ temp/
 # Build artifacts
 artifacts/*
 !artifacts/.gitkeep
+conv.txt

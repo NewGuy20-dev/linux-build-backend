@@ -1,12 +1,25 @@
 import { BuildSpec } from '../ai/schema';
-import { executeCommand } from '../executor/executor';
+import { executeCommandSecureArgs } from '../executor/executor';
 import { log } from '../executor/logger';
 import { checkCancellation } from '../utils/cancellation';
 import { flattenPackages } from '../utils/packages';
-import { sanitizePackageName } from '../utils/sanitizer';
+import { sanitizePackageName, validateBuildId } from '../utils/sanitizer';
 import { resolvePackages } from './packageMaps';
+import { DOCKER_IMAGES } from './dockerfileGenerator';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+
+/**
+ * Ensures the provided base distribution is supported by the toolchain.
+ *
+ * @param distro - The base distribution identifier to validate (must be a key in DOCKER_IMAGES)
+ * @throws Error if the distribution is not supported
+ */
+function validateBaseDistro(distro: string): void {
+  if (!(distro in DOCKER_IMAGES)) {
+    throw new Error(`Unsupported base distribution: ${distro}`);
+  }
+}
 
 // Kernel packages per distro
 const KERNELS: Record<string, Record<string, string>> = {
@@ -91,6 +104,12 @@ zfs create rpool/home
   return script;
 }
 
+/**
+ * Generate a shell script that performs post-installation configuration described in the spec.
+ *
+ * @param spec - Build specification containing post-install settings (e.g., systemTuning.swappiness, defaults.trim, custom scripts, and services to enable)
+ * @returns A string containing a POSIX-compatible shell script that applies sysctl tuning, enables fstrim when requested, embeds custom script entries, and enables listed services (attempting systemd then rc-update)
+ */
 function generatePostInstallScript(spec: BuildSpec): string {
   const lines: string[] = ['#!/bin/bash', 'set -e'];
 
@@ -114,6 +133,7 @@ function generatePostInstallScript(spec: BuildSpec): string {
 }
 
 const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const packages = flattenPackages(spec.packages).map(sanitizePackageName);
   const { packages: resolved } = resolvePackages(packages, 'arch');
   const kernel = getKernelPackage('arch', spec.kernel?.version || 'linux-lts');
@@ -121,7 +141,7 @@ const generateArchIso = async (spec: BuildSpec, buildId: string, workspacePath: 
   await fs.mkdir(outDir, { recursive: true });
 
   const allPkgs = [kernel, ...resolved];
-  const echoCommands = allPkgs.map(pkg => `RUN echo "${pkg}" >> /releng/packages.x86_64`).join('\n');
+  const echoCommands = allPkgs.map(pkg => `RUN echo "${sanitizePackageName(pkg)}" >> /releng/packages.x86_64`).join('\n');
   const grubConfig = generateBootloaderConfig(spec);
   const postInstall = generatePostInstallScript(spec);
 
@@ -130,8 +150,9 @@ FROM archlinux:latest
 RUN pacman -Syu --noconfirm archiso
 RUN cp -r /usr/share/archiso/configs/releng /releng
 ${echoCommands}
-RUN echo '${grubConfig.replace(/'/g, "\\'")}' > /releng/airootfs/etc/default/grub
-RUN echo '${postInstall.replace(/'/g, "\\'")}' > /releng/airootfs/root/post-install.sh
+RUN mkdir -p /releng/airootfs/etc/default /releng/airootfs/root
+RUN echo '${grubConfig.replace(/'/g, "\\'").replace(/\n/g, '\\n')}' > /releng/airootfs/etc/default/grub
+RUN echo '${postInstall.replace(/'/g, "\\'").replace(/\n/g, '\\n')}' > /releng/airootfs/root/post-install.sh
 RUN chmod +x /releng/airootfs/root/post-install.sh
 CMD ["mkarchiso", "-v", "-w", "/work", "-o", "/out", "/releng"]
 `.trim();
@@ -141,10 +162,10 @@ CMD ["mkarchiso", "-v", "-w", "/work", "-o", "/out", "/releng"]
 
   const imageName = `iso-arch-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -153,13 +174,14 @@ CMD ["mkarchiso", "-v", "-w", "/work", "-o", "/out", "/releng"]
 };
 
 const generateDebianIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const packages = flattenPackages(spec.packages).map(sanitizePackageName);
   const { packages: resolved } = resolvePackages(packages, 'debian');
   const kernel = getKernelPackage('debian', spec.kernel?.version || 'linux-lts');
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
-  const allPkgs = [kernel, ...resolved];
+  const allPkgs = [kernel, ...resolved].map(sanitizePackageName);
 
   const dockerfile = `
 FROM debian:bookworm
@@ -176,10 +198,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 
   const imageName = `iso-debian-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -188,13 +210,14 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 };
 
 const generateUbuntuIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const packages = flattenPackages(spec.packages).map(sanitizePackageName);
   const { packages: resolved } = resolvePackages(packages, 'ubuntu');
   const kernel = getKernelPackage('ubuntu', spec.kernel?.version || 'linux-lts');
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
-  const allPkgs = [kernel, ...resolved];
+  const allPkgs = [kernel, ...resolved].map(sanitizePackageName);
 
   const dockerfile = `
 FROM ubuntu:noble
@@ -211,10 +234,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 
   const imageName = `iso-ubuntu-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const iso = files.find(f => f.endsWith('.iso'));
@@ -223,6 +246,7 @@ CMD cp /build/*.iso /out/ 2>/dev/null || echo "ISO build failed"
 };
 
 const generateFedoraIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const packages = flattenPackages(spec.packages).map(sanitizePackageName);
   const { packages: resolved } = resolvePackages(packages, 'fedora');
   const outDir = path.join(workspacePath, 'out');
@@ -241,10 +265,10 @@ CMD cp /build/*.iso /out/ 2>/dev/null || tar -cvf /out/fedora-rootfs.tar /
 
   const imageName = `iso-fedora-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm --privileged -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '--privileged', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.iso') || f.endsWith('.tar'));
@@ -253,12 +277,13 @@ CMD cp /build/*.iso /out/ 2>/dev/null || tar -cvf /out/fedora-rootfs.tar /
 };
 
 const generateAlpineIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const packages = flattenPackages(spec.packages).map(sanitizePackageName);
   const { packages: resolved } = resolvePackages(packages, 'alpine');
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
-  const apkList = resolved.length > 0 ? resolved.join(' ') : 'alpine-base';
+  const apkList = resolved.length > 0 ? resolved.map(sanitizePackageName).join(' ') : 'alpine-base';
 
   const dockerfile = `
 FROM alpine:latest
@@ -273,10 +298,10 @@ CMD tar -cvf /out/alpine-${buildId}.tar -C /iso .
 
   const imageName = `iso-alpine-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.tar') || f.endsWith('.iso'));
@@ -285,13 +310,15 @@ CMD tar -cvf /out/alpine-${buildId}.tar -C /iso .
 };
 
 const generateGenericRootfs = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBuildId(buildId);
   const outDir = path.join(workspacePath, 'out');
   await fs.mkdir(outDir, { recursive: true });
 
   log(buildId, `Generating rootfs tarball for ${spec.base}...`);
 
+  const baseImage = spec.base === 'opensuse' ? 'opensuse/tumbleweed' : spec.base === 'void' ? 'voidlinux/voidlinux' : spec.base === 'gentoo' ? 'gentoo/stage3' : spec.base;
   const dockerfile = `
-FROM ${spec.base === 'opensuse' ? 'opensuse/tumbleweed' : spec.base === 'void' ? 'voidlinux/voidlinux' : spec.base === 'gentoo' ? 'gentoo/stage3' : spec.base}:latest
+FROM ${baseImage}:latest
 CMD tar -cvf /out/${spec.base}-rootfs-${buildId}.tar --exclude=/out --exclude=/proc --exclude=/sys --exclude=/dev /
 `.trim();
 
@@ -300,10 +327,10 @@ CMD tar -cvf /out/${spec.base}-rootfs-${buildId}.tar --exclude=/out --exclude=/p
 
   const imageName = `iso-${spec.base}-${buildId}`;
   await checkCancellation(buildId);
-  await executeCommand(`docker build -t ${imageName} -f "${dockerfilePath}" "${workspacePath}"`, buildId);
+  await executeCommandSecureArgs('docker', ['build', '-t', imageName, '-f', dockerfilePath, workspacePath], buildId);
   await checkCancellation(buildId);
-  await executeCommand(`docker run --rm -v "${outDir}:/out" ${imageName}`, buildId);
-  await executeCommand(`docker rmi ${imageName}`, buildId).catch(() => {});
+  await executeCommandSecureArgs('docker', ['run', '--rm', '-v', `${outDir}:/out`, imageName], buildId);
+  await executeCommandSecureArgs('docker', ['rmi', imageName], buildId).catch(() => {});
 
   const files = await fs.readdir(outDir);
   const artifact = files.find(f => f.endsWith('.tar'));
@@ -312,6 +339,7 @@ CMD tar -cvf /out/${spec.base}-rootfs-${buildId}.tar --exclude=/out --exclude=/p
 };
 
 export const generateIso = async (spec: BuildSpec, buildId: string, workspacePath: string): Promise<string> => {
+  validateBaseDistro(spec.base);
   log(buildId, `Starting ISO generation for ${spec.base}...`);
   log(buildId, `Kernel: ${spec.kernel?.version || 'linux-lts'}, Filesystem: ${spec.filesystem?.root || 'ext4'}`);
 

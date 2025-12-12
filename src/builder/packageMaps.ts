@@ -114,6 +114,59 @@ const PACKAGE_MAP: Record<string, PkgMap> = {
   kitty: { arch: 'kitty', debian: 'kitty', ubuntu: 'kitty', alpine: 'kitty', fedora: 'kitty', opensuse: 'kitty', void: 'kitty', gentoo: 'x11-terms/kitty' },
   alacritty: { arch: 'alacritty', debian: 'alacritty', ubuntu: 'alacritty', alpine: 'alacritty', fedora: 'alacritty', opensuse: 'alacritty', void: 'alacritty', gentoo: 'x11-terms/alacritty' },
   foot: { arch: 'foot', debian: 'foot', ubuntu: 'foot', alpine: 'foot', fedora: 'foot', opensuse: null, void: 'foot', gentoo: 'x11-terms/foot' },
+
+  // Additional Development Tools
+  lazygit: { arch: 'lazygit', debian: null, ubuntu: null, alpine: 'lazygit', fedora: 'lazygit', opensuse: null, void: 'lazygit', gentoo: null },
+  tmux: { arch: 'tmux', debian: 'tmux', ubuntu: 'tmux', alpine: 'tmux', fedora: 'tmux', opensuse: 'tmux', void: 'tmux', gentoo: 'app-misc/tmux' },
+  screen: { arch: 'screen', debian: 'screen', ubuntu: 'screen', alpine: 'screen', fedora: 'screen', opensuse: 'screen', void: 'screen', gentoo: 'app-misc/screen' },
+  make: { arch: 'make', debian: 'make', ubuntu: 'make', alpine: 'make', fedora: 'make', opensuse: 'make', void: 'make', gentoo: 'sys-devel/make' },
+  cmake: { arch: 'cmake', debian: 'cmake', ubuntu: 'cmake', alpine: 'cmake', fedora: 'cmake', opensuse: 'cmake', void: 'cmake', gentoo: 'dev-build/cmake' },
+  gcc: { arch: 'gcc', debian: 'gcc', ubuntu: 'gcc', alpine: 'gcc', fedora: 'gcc', opensuse: 'gcc', void: 'gcc', gentoo: 'sys-devel/gcc' },
+  clang: { arch: 'clang', debian: 'clang', ubuntu: 'clang', alpine: 'clang', fedora: 'clang', opensuse: 'clang', void: 'clang', gentoo: 'sys-devel/clang' },
+
+  // Modern CLI Tools
+  fzf: { arch: 'fzf', debian: 'fzf', ubuntu: 'fzf', alpine: 'fzf', fedora: 'fzf', opensuse: 'fzf', void: 'fzf', gentoo: 'app-shells/fzf' },
+  ripgrep: { arch: 'ripgrep', debian: 'ripgrep', ubuntu: 'ripgrep', alpine: 'ripgrep', fedora: 'ripgrep', opensuse: 'ripgrep', void: 'ripgrep', gentoo: 'sys-apps/ripgrep' },
+  fd: { arch: 'fd', debian: 'fd-find', ubuntu: 'fd-find', alpine: 'fd', fedora: 'fd-find', opensuse: 'fd', void: 'fd', gentoo: 'sys-apps/fd' },
+  bat: { arch: 'bat', debian: 'bat', ubuntu: 'bat', alpine: 'bat', fedora: 'bat', opensuse: 'bat', void: 'bat', gentoo: 'sys-apps/bat' },
+  exa: { arch: 'exa', debian: 'exa', ubuntu: 'exa', alpine: 'exa', fedora: 'exa', opensuse: null, void: 'exa', gentoo: 'sys-apps/exa' },
+  eza: { arch: 'eza', debian: null, ubuntu: null, alpine: 'eza', fedora: 'eza', opensuse: null, void: 'eza', gentoo: 'sys-apps/eza' },
+  zoxide: { arch: 'zoxide', debian: null, ubuntu: null, alpine: 'zoxide', fedora: 'zoxide', opensuse: null, void: 'zoxide', gentoo: 'app-shells/zoxide' },
+  jq: { arch: 'jq', debian: 'jq', ubuntu: 'jq', alpine: 'jq', fedora: 'jq', opensuse: 'jq', void: 'jq', gentoo: 'app-misc/jq' },
+  yq: { arch: 'yq', debian: null, ubuntu: null, alpine: 'yq', fedora: null, opensuse: null, void: 'yq', gentoo: null },
+
+  // File Managers
+  ranger: { arch: 'ranger', debian: 'ranger', ubuntu: 'ranger', alpine: 'ranger', fedora: 'ranger', opensuse: 'ranger', void: 'ranger', gentoo: 'app-misc/ranger' },
+  lf: { arch: 'lf', debian: null, ubuntu: null, alpine: 'lf', fedora: null, opensuse: null, void: 'lf', gentoo: null },
+  nnn: { arch: 'nnn', debian: 'nnn', ubuntu: 'nnn', alpine: 'nnn', fedora: 'nnn', opensuse: 'nnn', void: 'nnn', gentoo: 'app-misc/nnn' },
+  mc: { arch: 'mc', debian: 'mc', ubuntu: 'mc', alpine: 'mc', fedora: 'mc', opensuse: 'mc', void: 'mc', gentoo: 'app-misc/mc' },
+
+  // System Tools
+  btop: { arch: 'btop', debian: 'btop', ubuntu: 'btop', alpine: 'btop', fedora: 'btop', opensuse: 'btop', void: 'btop', gentoo: 'sys-process/btop' },
+  bottom: { arch: 'bottom', debian: null, ubuntu: null, alpine: 'bottom', fedora: null, opensuse: null, void: 'bottom', gentoo: null },
+  dust: { arch: 'dust', debian: null, ubuntu: null, alpine: 'dust', fedora: null, opensuse: null, void: 'dust', gentoo: null },
+  duf: { arch: 'duf', debian: 'duf', ubuntu: 'duf', alpine: 'duf', fedora: 'duf', opensuse: null, void: 'duf', gentoo: 'sys-fs/duf' },
+  ncdu: { arch: 'ncdu', debian: 'ncdu', ubuntu: 'ncdu', alpine: 'ncdu', fedora: 'ncdu', opensuse: 'ncdu', void: 'ncdu', gentoo: 'sys-fs/ncdu' },
+  tree: { arch: 'tree', debian: 'tree', ubuntu: 'tree', alpine: 'tree', fedora: 'tree', opensuse: 'tree', void: 'tree', gentoo: 'app-text/tree' },
+
+  // Networking Tools
+  nmap: { arch: 'nmap', debian: 'nmap', ubuntu: 'nmap', alpine: 'nmap', fedora: 'nmap', opensuse: 'nmap', void: 'nmap', gentoo: 'net-analyzer/nmap' },
+  tcpdump: { arch: 'tcpdump', debian: 'tcpdump', ubuntu: 'tcpdump', alpine: 'tcpdump', fedora: 'tcpdump', opensuse: 'tcpdump', void: 'tcpdump', gentoo: 'net-analyzer/tcpdump' },
+  iperf: { arch: 'iperf3', debian: 'iperf3', ubuntu: 'iperf3', alpine: 'iperf3', fedora: 'iperf3', opensuse: 'iperf', void: 'iperf3', gentoo: 'net-misc/iperf' },
+  mtr: { arch: 'mtr', debian: 'mtr', ubuntu: 'mtr', alpine: 'mtr', fedora: 'mtr', opensuse: 'mtr', void: 'mtr', gentoo: 'net-analyzer/mtr' },
+
+  // Desktop Environments
+  gnome: { arch: 'gnome', debian: 'gnome', ubuntu: 'ubuntu-desktop', alpine: null, fedora: '@gnome-desktop', opensuse: 'gnome', void: 'gnome', gentoo: 'gnome-base/gnome' },
+  kde: { arch: 'plasma', debian: 'kde-plasma-desktop', ubuntu: 'kubuntu-desktop', alpine: null, fedora: '@kde-desktop', opensuse: 'plasma5-session', void: 'kde5', gentoo: 'kde-plasma/plasma-meta' },
+  xfce: { arch: 'xfce4', debian: 'xfce4', ubuntu: 'xubuntu-desktop', alpine: 'xfce4', fedora: '@xfce-desktop', opensuse: 'xfce4-session', void: 'xfce4', gentoo: 'xfce-base/xfce4-meta' },
+
+  // Plymouth
+  plymouth: { arch: 'plymouth', debian: 'plymouth', ubuntu: 'plymouth', alpine: null, fedora: 'plymouth', opensuse: 'plymouth', void: 'plymouth', gentoo: 'sys-boot/plymouth' },
+
+  // DNS/Privacy
+  stubby: { arch: 'stubby', debian: 'stubby', ubuntu: 'stubby', alpine: 'stubby', fedora: 'stubby', opensuse: null, void: 'stubby', gentoo: 'net-dns/stubby' },
+  dnscrypt: { arch: 'dnscrypt-proxy', debian: 'dnscrypt-proxy', ubuntu: 'dnscrypt-proxy', alpine: 'dnscrypt-proxy', fedora: 'dnscrypt-proxy', opensuse: 'dnscrypt-proxy', void: 'dnscrypt-proxy', gentoo: 'net-dns/dnscrypt-proxy' },
+  macchanger: { arch: 'macchanger', debian: 'macchanger', ubuntu: 'macchanger', alpine: 'macchanger', fedora: 'macchanger', opensuse: null, void: 'macchanger', gentoo: 'net-analyzer/macchanger' },
 };
 
 export interface ResolvedPackages {

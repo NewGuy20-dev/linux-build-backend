@@ -16,6 +16,9 @@ RUN apt-get update && \
     syslinux \
     && rm -rf /var/lib/apt/lists/*
 
+# Create non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+
 # Copy package.json and package-lock.json
 COPY package*.json ./
 
@@ -24,6 +27,12 @@ RUN npm install
 
 # Copy the rest of the application code
 COPY . .
+
+# Set ownership to non-root user
+RUN chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
 
 # Expose the port the app runs on
 EXPOSE 3000
