@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
+import { randomBytes } from 'crypto';
 
 // OAuth2 configuration
 interface OAuthConfig {
@@ -10,6 +11,10 @@ interface OAuthConfig {
   userInfoUrl: string;
   redirectUri: string;
 }
+
+// State storage for CSRF protection (use Redis in production)
+const stateStore = new Map<string, { expires: number }>();
+const STATE_TTL = 600000; // 10 minutes
 
 const getOAuthConfig = (): OAuthConfig | null => {
   const clientId = process.env.OAUTH_CLIENT_ID;
@@ -33,11 +38,16 @@ export const initiateOAuth = (_req: Request, res: Response) => {
     return;
   }
 
+  // Generate CSRF state token
+  const state = randomBytes(32).toString('hex');
+  stateStore.set(state, { expires: Date.now() + STATE_TTL });
+
   const params = new URLSearchParams({
     client_id: config.clientId,
     redirect_uri: config.redirectUri,
     response_type: 'code',
     scope: 'openid profile email',
+    state,
   });
 
   res.redirect(`${config.authorizationUrl}?${params}`);
@@ -50,14 +60,28 @@ export const handleOAuthCallback = async (req: Request, res: Response) => {
     return;
   }
 
-  const { code } = req.query;
+  const { code, state } = req.query;
+  
+  // Validate CSRF state
+  if (!state || typeof state !== 'string') {
+    res.status(400).json({ error: 'Missing state parameter' });
+    return;
+  }
+  
+  const storedState = stateStore.get(state);
+  if (!storedState || storedState.expires < Date.now()) {
+    stateStore.delete(state as string);
+    res.status(400).json({ error: 'Invalid or expired state' });
+    return;
+  }
+  stateStore.delete(state as string);
+
   if (!code) {
     res.status(400).json({ error: 'Missing authorization code' });
     return;
   }
 
   try {
-    // Exchange code for token
     const tokenRes = await fetch(config.tokenUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -73,7 +97,6 @@ export const handleOAuthCallback = async (req: Request, res: Response) => {
     const tokens = await tokenRes.json();
     if (!tokens.access_token) throw new Error('No access token');
 
-    // Get user info
     const userRes = await fetch(config.userInfoUrl, {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
