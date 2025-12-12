@@ -2,33 +2,23 @@ import { Request, Response, NextFunction } from 'express';
 import prisma from '../db/db';
 import { logger } from '../utils/logger';
 
-// Permission definitions
 export const PERMISSIONS = {
-  // Build permissions
   'build:read': 'View builds',
   'build:write': 'Create builds',
   'build:delete': 'Delete builds',
   'build:cancel': 'Cancel builds',
-
-  // Template permissions
   'template:read': 'View templates',
   'template:write': 'Create/edit templates',
   'template:delete': 'Delete templates',
   'template:publish': 'Publish templates',
-
-  // Team permissions
   'team:read': 'View teams',
   'team:manage': 'Manage team members',
   'team:create': 'Create teams',
   'team:delete': 'Delete teams',
-
-  // Admin permissions
   'admin:users': 'Manage users',
   'admin:billing': 'View/manage billing',
   'admin:settings': 'Manage tenant settings',
   'admin:audit': 'View audit logs',
-
-  // API key permissions
   'apikey:read': 'View API keys',
   'apikey:write': 'Create API keys',
   'apikey:revoke': 'Revoke API keys',
@@ -36,7 +26,6 @@ export const PERMISSIONS = {
 
 export type Permission = keyof typeof PERMISSIONS;
 
-// Default role permissions
 export const DEFAULT_ROLES: Record<string, Permission[]> = {
   owner: Object.keys(PERMISSIONS) as Permission[],
   admin: [
@@ -59,7 +48,34 @@ export const DEFAULT_ROLES: Record<string, Permission[]> = {
   ],
 };
 
-// Get user permissions (from custom role or default)
+// Validate user ID format (CUID2 pattern)
+const USER_ID_PATTERN = /^[a-z0-9]{20,30}$/;
+
+const validateUserId = (userId: string | undefined): string | null => {
+  if (!userId || typeof userId !== 'string') return null;
+  // Allow CUID2 format or UUID format
+  if (USER_ID_PATTERN.test(userId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+    return userId;
+  }
+  return null;
+};
+
+// Get authenticated user ID from request (prefer authenticated source)
+const getAuthenticatedUserId = (req: Request): string | null => {
+  // Prefer user ID from authentication middleware (set by auth.ts)
+  if (req.authenticatedUserId) {
+    return req.authenticatedUserId;
+  }
+
+  // Fall back to header only if request is authenticated via API key
+  if (req.apiKey) {
+    const headerUserId = req.headers['x-user-id'] as string;
+    return validateUserId(headerUserId);
+  }
+
+  return null;
+};
+
 export const getUserPermissions = async (tenantId: string, userId: string): Promise<Permission[]> => {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
@@ -67,7 +83,6 @@ export const getUserPermissions = async (tenantId: string, userId: string): Prom
 
   if (!member) return [];
 
-  // Check for custom role first
   const customRole = await prisma.customRole.findFirst({
     where: { tenantId, name: member.role },
   });
@@ -76,17 +91,14 @@ export const getUserPermissions = async (tenantId: string, userId: string): Prom
     return customRole.permissions as Permission[];
   }
 
-  // Fall back to default role
   return DEFAULT_ROLES[member.role] || [];
 };
 
-// Check if user has specific permission
 export const hasPermission = async (tenantId: string, userId: string, permission: Permission): Promise<boolean> => {
   const permissions = await getUserPermissions(tenantId, userId);
   return permissions.includes(permission);
 };
 
-// Middleware to check permission
 export const checkPermission = (permission: Permission) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.tenantId) {
@@ -94,9 +106,10 @@ export const checkPermission = (permission: Permission) => {
       return;
     }
 
-    const userId = req.headers['x-user-id'] as string;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
-      res.status(401).json({ error: 'User ID required' });
+      logger.warn({ ip: req.ip }, 'Permission check failed: no valid user ID');
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
@@ -111,7 +124,6 @@ export const checkPermission = (permission: Permission) => {
   };
 };
 
-// Check multiple permissions (any)
 export const checkAnyPermission = (permissions: Permission[]) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     if (!req.tenantId) {
@@ -119,9 +131,9 @@ export const checkAnyPermission = (permissions: Permission[]) => {
       return;
     }
 
-    const userId = req.headers['x-user-id'] as string;
+    const userId = getAuthenticatedUserId(req);
     if (!userId) {
-      res.status(401).json({ error: 'User ID required' });
+      res.status(401).json({ error: 'Authentication required' });
       return;
     }
 
@@ -137,17 +149,19 @@ export const checkAnyPermission = (permissions: Permission[]) => {
   };
 };
 
-// CRUD for custom roles
 export const createCustomRole = async (tenantId: string, name: string, permissions: Permission[]) => {
+  // Validate permissions
+  const validPerms = permissions.filter((p) => p in PERMISSIONS);
   return prisma.customRole.create({
-    data: { tenantId, name, permissions },
+    data: { tenantId, name, permissions: validPerms },
   });
 };
 
 export const updateCustomRole = async (roleId: string, permissions: Permission[]) => {
+  const validPerms = permissions.filter((p) => p in PERMISSIONS);
   return prisma.customRole.update({
     where: { id: roleId },
-    data: { permissions },
+    data: { permissions: validPerms },
   });
 };
 

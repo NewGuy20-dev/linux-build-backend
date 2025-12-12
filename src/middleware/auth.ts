@@ -9,6 +9,7 @@ declare global {
       apiKeyId?: string;
       apiKeyValid?: boolean;
       scopes?: string[];
+      authenticatedUserId?: string;
     }
   }
 }

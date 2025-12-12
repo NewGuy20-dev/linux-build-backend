@@ -11,15 +11,15 @@ export interface UsageRecord {
   metadata?: Record<string, any>;
 }
 
-// Unit costs (in cents)
 const UNIT_COSTS: Record<UsageType, number> = {
-  build: 50,           // $0.50 per build
-  storage: 1,          // $0.01 per MB per month
-  api_call: 0,         // Free (included)
-  compliance_check: 10, // $0.10 per check
+  build: 50,
+  storage: 1,
+  api_call: 0,
+  compliance_check: 10,
 };
 
-// Record usage
+const MAX_DAYS = 90;
+
 export const recordUsage = async (record: UsageRecord): Promise<void> => {
   const cost = record.unitCost ?? UNIT_COSTS[record.type] ?? 0;
 
@@ -36,7 +36,6 @@ export const recordUsage = async (record: UsageRecord): Promise<void> => {
   logger.debug({ ...record, cost }, 'Usage recorded');
 };
 
-// Record build usage
 export const recordBuildUsage = async (tenantId: string, buildId: string, durationSeconds: number): Promise<void> => {
   await recordUsage({
     tenantId,
@@ -47,7 +46,6 @@ export const recordBuildUsage = async (tenantId: string, buildId: string, durati
   });
 };
 
-// Record storage usage
 export const recordStorageUsage = async (tenantId: string, sizeMb: number): Promise<void> => {
   await recordUsage({
     tenantId,
@@ -57,7 +55,6 @@ export const recordStorageUsage = async (tenantId: string, sizeMb: number): Prom
   });
 };
 
-// Get usage summary for a tenant
 export const getUsageSummary = async (tenantId: string, startDate: Date, endDate: Date) => {
   const records = await prisma.usageRecord.findMany({
     where: {
@@ -89,7 +86,6 @@ export const getUsageSummary = async (tenantId: string, startDate: Date, endDate
   };
 };
 
-// Get monthly invoice data
 export const getMonthlyInvoice = async (tenantId: string, year: number, month: number) => {
   const startDate = new Date(year, month - 1, 1);
   const endDate = new Date(year, month, 0, 23, 59, 59);
@@ -102,17 +98,15 @@ export const getMonthlyInvoice = async (tenantId: string, year: number, month: n
     tenantName: tenant?.name,
     invoicePeriod: `${year}-${String(month).padStart(2, '0')}`,
     ...summary,
-    status: 'pending', // Would integrate with payment system
+    status: 'pending',
   };
 };
 
-// Check if tenant is within budget
 export const checkBudget = async (tenantId: string, monthlyBudgetCents: number): Promise<{ withinBudget: boolean; currentSpend: number; remaining: number }> => {
   const now = new Date();
   const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-  const endDate = now;
 
-  const summary = await getUsageSummary(tenantId, startDate, endDate);
+  const summary = await getUsageSummary(tenantId, startDate, now);
   const remaining = monthlyBudgetCents - summary.totalCost;
 
   return {
@@ -122,34 +116,47 @@ export const checkBudget = async (tenantId: string, monthlyBudgetCents: number):
   };
 };
 
-// Get daily usage for charts
+// Fixed: Single query instead of N+1
 export const getDailyUsage = async (tenantId: string, days = 30) => {
-  const result: Array<{ date: string; builds: number; cost: number }> = [];
+  // Limit days to prevent DoS
+  const safeDays = Math.min(Math.max(1, days), MAX_DAYS);
 
-  for (let i = 0; i < days; i++) {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - safeDays);
+  startDate.setHours(0, 0, 0, 0);
+
+  // Single query for all records in range
+  const records = await prisma.usageRecord.findMany({
+    where: {
+      tenantId,
+      timestamp: { gte: startDate },
+    },
+    orderBy: { timestamp: 'asc' },
+  });
+
+  // Group by date in memory
+  const dailyMap = new Map<string, { builds: number; cost: number }>();
+
+  // Initialize all days
+  for (let i = 0; i < safeDays; i++) {
     const date = new Date();
     date.setDate(date.getDate() - i);
-    date.setHours(0, 0, 0, 0);
-
-    const nextDate = new Date(date);
-    nextDate.setDate(nextDate.getDate() + 1);
-
-    const records = await prisma.usageRecord.findMany({
-      where: {
-        tenantId,
-        timestamp: { gte: date, lt: nextDate },
-      },
-    });
-
-    const builds = records.filter((r) => r.type === 'build').reduce((sum, r) => sum + r.quantity, 0);
-    const cost = records.reduce((sum, r) => sum + r.quantity * r.unitCost, 0);
-
-    result.push({
-      date: date.toISOString().split('T')[0],
-      builds,
-      cost,
-    });
+    const key = date.toISOString().split('T')[0];
+    dailyMap.set(key, { builds: 0, cost: 0 });
   }
 
-  return result.reverse();
+  // Aggregate records
+  for (const record of records) {
+    const key = record.timestamp.toISOString().split('T')[0];
+    const day = dailyMap.get(key);
+    if (day) {
+      if (record.type === 'build') day.builds += record.quantity;
+      day.cost += record.quantity * record.unitCost;
+    }
+  }
+
+  // Convert to array
+  return Array.from(dailyMap.entries())
+    .map(([date, data]) => ({ date, ...data }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 };

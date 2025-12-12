@@ -1,22 +1,18 @@
 import { logger } from '../utils/logger';
 import { PluginContext, HookType } from './loader';
 
-// Sandboxed execution environment for plugins
-// Uses isolated context with limited API surface
-
 export interface SandboxOptions {
-  timeout?: number;        // Execution timeout in ms
-  memoryLimit?: number;    // Memory limit in MB
-  allowedModules?: string[]; // Allowed require modules
+  timeout?: number;
+  memoryLimit?: number;
+  allowedDomains?: string[];
 }
 
 const DEFAULT_OPTIONS: Required<SandboxOptions> = {
   timeout: 30000,
   memoryLimit: 128,
-  allowedModules: ['path', 'crypto'],
+  allowedDomains: [],
 };
 
-// Safe console wrapper
 const createSafeConsole = (pluginName: string) => ({
   log: (...args: any[]) => logger.info({ plugin: pluginName }, args.join(' ')),
   warn: (...args: any[]) => logger.warn({ plugin: pluginName }, args.join(' ')),
@@ -24,18 +20,33 @@ const createSafeConsole = (pluginName: string) => ({
   info: (...args: any[]) => logger.info({ plugin: pluginName }, args.join(' ')),
 });
 
-// Safe fetch wrapper with restrictions
+// Comprehensive SSRF protection
 const createSafeFetch = (pluginName: string, allowedDomains: string[] = []) => {
   return async (url: string, options?: RequestInit) => {
     const urlObj = new URL(url);
-    
-    // Block internal/private IPs
-    const blockedPatterns = [/^localhost$/i, /^127\./, /^10\./, /^192\.168\./, /^172\.(1[6-9]|2\d|3[01])\./];
-    if (blockedPatterns.some(p => p.test(urlObj.hostname))) {
+
+    // Block all private/internal IPs and metadata endpoints
+    const blockedPatterns = [
+      /^localhost$/i,
+      /^127\./,
+      /^10\./,
+      /^192\.168\./,
+      /^172\.(1[6-9]|2\d|3[01])\./,
+      /^169\.254\./,
+      /^0\.0\.0\.0$/,
+      /^::1$/,
+      /^fc00:/i,
+      /^fe80:/i,
+      /^fd[0-9a-f]{2}:/i,
+      /metadata/i,
+      /^169\.254\.169\.254$/,
+      /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./,  // Carrier-grade NAT
+    ];
+
+    if (blockedPatterns.some((p) => p.test(urlObj.hostname))) {
       throw new Error('Access to internal networks is not allowed');
     }
 
-    // Check allowed domains if specified
     if (allowedDomains.length > 0 && !allowedDomains.includes(urlObj.hostname)) {
       throw new Error(`Domain ${urlObj.hostname} is not in allowed list`);
     }
@@ -45,29 +56,63 @@ const createSafeFetch = (pluginName: string, allowedDomains: string[] = []) => {
   };
 };
 
-// Create sandboxed context for plugin execution
+// Validate plugin code - comprehensive patterns to prevent sandbox escape
+export const validatePluginCode = (code: string): { valid: boolean; errors: string[] } => {
+  const errors: string[] = [];
+
+  const dangerousPatterns = [
+    { pattern: /\beval\s*\(/, message: 'eval() is not allowed' },
+    { pattern: /\bFunction\s*\(/, message: 'Function constructor is not allowed' },
+    { pattern: /\brequire\s*\(/, message: 'require() is not allowed' },
+    { pattern: /\bimport\s*\(/, message: 'Dynamic import is not allowed' },
+    { pattern: /\bprocess\./, message: 'process access is not allowed' },
+    { pattern: /\b__dirname\b/, message: '__dirname is not allowed' },
+    { pattern: /\b__filename\b/, message: '__filename is not allowed' },
+    { pattern: /child_process/, message: 'child_process is not allowed' },
+    { pattern: /\bfs\b/, message: 'fs module is not allowed' },
+    // Sandbox escape prevention
+    { pattern: /getPrototypeOf/, message: 'getPrototypeOf is not allowed' },
+    { pattern: /\bconstructor\b/, message: 'constructor access is not allowed' },
+    { pattern: /__proto__/, message: '__proto__ access is not allowed' },
+    { pattern: /\bprototype\b/, message: 'prototype access is not allowed' },
+    { pattern: /\bProxy\b/, message: 'Proxy is not allowed' },
+    { pattern: /\bReflect\b/, message: 'Reflect is not allowed' },
+    { pattern: /\bSymbol\b/, message: 'Symbol is not allowed' },
+    { pattern: /\bwith\s*\(/, message: 'with statement is not allowed' },
+    { pattern: /\bglobalThis\b/, message: 'globalThis is not allowed' },
+    { pattern: /\bwindow\b/, message: 'window is not allowed' },
+    { pattern: /\bglobal\b/, message: 'global is not allowed' },
+    { pattern: /\bthis\s*\[/, message: 'this[] access is not allowed' },
+  ];
+
+  for (const { pattern, message } of dangerousPatterns) {
+    if (pattern.test(code)) {
+      errors.push(message);
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+};
+
+// Create frozen sandbox context
 export const createSandboxContext = (pluginName: string, ctx: PluginContext, options: SandboxOptions = {}) => {
   const opts = { ...DEFAULT_OPTIONS, ...options };
 
-  return {
-    // Plugin context (read-only)
-    context: Object.freeze({ ...ctx }),
+  // Create frozen copies to prevent prototype pollution
+  const frozenContext = Object.freeze({ ...ctx });
 
-    // Safe console
-    console: createSafeConsole(pluginName),
-
-    // Safe fetch
-    fetch: createSafeFetch(pluginName),
-
-    // Limited globals
+  const sandbox = {
+    context: frozenContext,
+    console: Object.freeze(createSafeConsole(pluginName)),
+    fetch: createSafeFetch(pluginName, opts.allowedDomains),
     setTimeout: (fn: () => void, ms: number) => setTimeout(fn, Math.min(ms, opts.timeout)),
     clearTimeout,
     Promise,
-    JSON,
-    Math,
+    JSON: Object.freeze({ parse: JSON.parse, stringify: JSON.stringify }),
+    Math: Object.freeze({ ...Math }),
     Date,
     Array,
-    Object,
+    Object: Object.freeze({ keys: Object.keys, values: Object.values, entries: Object.entries, freeze: Object.freeze }),
     String,
     Number,
     Boolean,
@@ -75,24 +120,40 @@ export const createSandboxContext = (pluginName: string, ctx: PluginContext, opt
     Map,
     Set,
     RegExp,
-
-    // Blocked globals
+    parseInt,
+    parseFloat,
+    isNaN,
+    isFinite,
+    // Explicitly blocked
     eval: undefined,
     Function: undefined,
     require: undefined,
     process: undefined,
     __dirname: undefined,
     __filename: undefined,
+    globalThis: undefined,
+    global: undefined,
+    window: undefined,
+    Proxy: undefined,
+    Reflect: undefined,
   };
+
+  return Object.freeze(sandbox);
 };
 
-// Execute plugin code in sandbox
+// Execute plugin code safely
 export const runInSandbox = async (
   pluginName: string,
   code: string,
   ctx: PluginContext,
   options: SandboxOptions = {}
 ): Promise<void> => {
+  // Validate first
+  const validation = validatePluginCode(code);
+  if (!validation.valid) {
+    throw new Error(`Code validation failed: ${validation.errors.join(', ')}`);
+  }
+
   const opts = { ...DEFAULT_OPTIONS, ...options };
   const sandbox = createSandboxContext(pluginName, ctx, opts);
 
@@ -104,11 +165,13 @@ export const runInSandbox = async (
     }, opts.timeout);
 
     try {
-      // Create async function from code
-      const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-      const fn = new AsyncFunction(...Object.keys(sandbox), `"use strict";\n${code}`);
+      // Use Function constructor with strict validation already done
+      const argNames = Object.keys(sandbox);
+      const argValues = Object.values(sandbox);
+      const wrappedCode = `"use strict";\nreturn (async () => {\n${code}\n})();`;
+      const fn = new Function(...argNames, wrappedCode);
 
-      fn(...Object.values(sandbox))
+      Promise.resolve(fn(...argValues))
         .then(() => {
           clearTimeout(timer);
           resolve();
@@ -124,33 +187,6 @@ export const runInSandbox = async (
   });
 };
 
-// Validate plugin code before execution
-export const validatePluginCode = (code: string): { valid: boolean; errors: string[] } => {
-  const errors: string[] = [];
-
-  // Check for dangerous patterns
-  const dangerousPatterns = [
-    { pattern: /\beval\s*\(/, message: 'eval() is not allowed' },
-    { pattern: /\bFunction\s*\(/, message: 'Function constructor is not allowed' },
-    { pattern: /\brequire\s*\(/, message: 'require() is not allowed' },
-    { pattern: /\bimport\s*\(/, message: 'Dynamic import is not allowed' },
-    { pattern: /\bprocess\./, message: 'process access is not allowed' },
-    { pattern: /\b__dirname\b/, message: '__dirname is not allowed' },
-    { pattern: /\b__filename\b/, message: '__filename is not allowed' },
-    { pattern: /child_process/, message: 'child_process is not allowed' },
-    { pattern: /\bfs\b/, message: 'fs module is not allowed' },
-  ];
-
-  for (const { pattern, message } of dangerousPatterns) {
-    if (pattern.test(code)) {
-      errors.push(message);
-    }
-  }
-
-  return { valid: errors.length === 0, errors };
-};
-
-// Safe plugin execution wrapper
 export const executePluginSafe = async (
   pluginName: string,
   hook: HookType,
@@ -158,13 +194,6 @@ export const executePluginSafe = async (
   ctx: PluginContext,
   options?: SandboxOptions
 ): Promise<{ success: boolean; error?: string }> => {
-  // Validate code first
-  const validation = validatePluginCode(code);
-  if (!validation.valid) {
-    logger.error({ plugin: pluginName, errors: validation.errors }, 'Plugin validation failed');
-    return { success: false, error: `Validation failed: ${validation.errors.join(', ')}` };
-  }
-
   try {
     await runInSandbox(pluginName, code, ctx, options);
     logger.info({ plugin: pluginName, hook }, 'Plugin executed successfully');

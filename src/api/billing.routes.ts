@@ -4,6 +4,10 @@ import { checkPermission } from '../middleware/customRoles';
 
 const router = Router();
 
+const MAX_BUDGET = 10000000; // $100,000 max
+const MIN_YEAR = 2020;
+const MAX_YEAR = 2100;
+
 // Get current month usage summary
 router.get('/billing/usage', checkPermission('admin:billing'), async (req: Request, res: Response) => {
   if (!req.tenantId) {
@@ -28,7 +32,7 @@ router.get('/billing/invoice/:year/:month', checkPermission('admin:billing'), as
   const year = parseInt(req.params.year, 10);
   const month = parseInt(req.params.month, 10);
 
-  if (isNaN(year) || isNaN(month) || month < 1 || month > 12) {
+  if (isNaN(year) || isNaN(month) || month < 1 || month > 12 || year < MIN_YEAR || year > MAX_YEAR) {
     res.status(400).json({ error: 'Invalid year or month' });
     return;
   }
@@ -44,7 +48,7 @@ router.get('/billing/daily', checkPermission('admin:billing'), async (req: Reque
     return;
   }
 
-  const days = Math.min(90, parseInt(req.query.days as string, 10) || 30);
+  const days = Math.min(90, Math.max(1, parseInt(req.query.days as string, 10) || 30));
   const usage = await getDailyUsage(req.tenantId, days);
   res.json({ usage });
 });
@@ -56,7 +60,7 @@ router.get('/billing/budget', checkPermission('admin:billing'), async (req: Requ
     return;
   }
 
-  const budget = parseInt(req.query.budget as string, 10) || 10000; // Default $100
+  const budget = Math.min(MAX_BUDGET, Math.max(0, parseInt(req.query.budget as string, 10) || 10000));
   const status = await checkBudget(req.tenantId, budget);
   res.json({
     ...status,
