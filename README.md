@@ -10,7 +10,7 @@ This is the backend for the Linux Builder Engine, a service that generates custo
 - **ORM:** Prisma + Neon PostgreSQL
 - **Container runtime:** Docker CLI
 - **WebSockets:** ws (npm package)
-- **Environment:** DevContainer (Codespaces)
+   
 
 ## Getting Started
 
@@ -46,3 +46,4 @@ This is the backend for the Linux Builder Engine, a service that generates custo
     -   **Body:** A JSON object that conforms to the `BuildSpec` schema.
 -   `GET /api/build/status/:id`: Gets the status of a build.
 -   `GET /api/build/artifact/:id`: Gets the URL of a build artifact.
+
